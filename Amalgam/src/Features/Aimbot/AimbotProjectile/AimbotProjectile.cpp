@@ -396,7 +396,7 @@ std::unordered_map<int, Vec3> CAimbotProjectile::GetDirectPoints(Target_t& tTarg
 				mPoints[iPriority] = Vec3(0, 0, vMaxs.z - Vars::Aimbot::Projectile::VerticalShift.Value);
 			break;
 		case BOUNDS_BODY: mPoints[iPriority] = Vec3(0, 0, (vMaxs.z - vMins.z) / 2); break;
-		case BOUNDS_FEET: mPoints[iPriority] = Vec3(0, 0, vMins.z + Vars::Aimbot::Projectile::VerticalShift.Value); break;
+		case BOUNDS_FEET: mPoints[iPriority] = Vec3(0, 0, vMins.z + Vars::Aimbot::Projectile::VerticalShift.Value + m_tInfo.m_vHull.z); break;
 		}
 	}
 
@@ -1422,7 +1422,7 @@ int CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBas
 		if (!tStorage.m_bFailed)
 		{
 			F::MoveSim.RunTick(tStorage);
-			tTarget.m_vPos = tStorage.m_vPredictedOrigin;
+			tTarget.m_vPos = tStorage.m_MoveData.m_vecAbsOrigin;
 		}
 		if (i < 0)
 			continue;
@@ -2109,7 +2109,7 @@ bool CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBa
 		if (!tStorage.m_bFailed)
 		{
 			F::MoveSim.RunTick(tStorage);
-			tTarget.m_vPos = tStorage.m_vPredictedOrigin;
+			tTarget.m_vPos = tStorage.m_MoveData.m_vecAbsOrigin;
 		}
 		if (i < 0)
 			continue;
