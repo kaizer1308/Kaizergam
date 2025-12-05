@@ -195,6 +195,11 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 	{
 		const auto& vRecords = m_mRecords[pPlayer->entindex()];
 		const auto iSamples = vRecords.size();
+		if (vRecords.empty())
+		{
+			tStorage.m_bFailed = true;
+			return false;
+		}
 
 		float flCurrentChance = 1.f;
 		double dbAverageYaw = 0.0;

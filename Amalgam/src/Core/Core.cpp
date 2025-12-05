@@ -144,10 +144,10 @@ void CCore::Unload()
 	U::BytePatches.Unload();
 	H::Events.Unload();
 
-	if (F::Menu.m_bIsOpen)
+	if (F::Menu.m_bIsOpen && I::MatSystemSurface)
 		I::MatSystemSurface->SetCursorAlwaysVisible(false);
 	F::Visuals.RestoreWorldModulation();
-	if (I::Input->CAM_IsThirdPerson())
+	if (I::Input && I::Input->CAM_IsThirdPerson())
 	{
 		if (auto pLocal = H::Entities.GetLocal())
 		{
@@ -155,8 +155,10 @@ void CCore::Unload()
 			pLocal->ThirdPersonSwitch();
 		}
 	}
-	H::ConVars.FindVar("cl_wpn_sway_interp")->SetValue(0.f);
-	H::ConVars.FindVar("cl_wpn_sway_scale")->SetValue(0.f);
+	if (auto cl_wpn_sway_interp = H::ConVars.FindVar("cl_wpn_sway_interp"))
+		cl_wpn_sway_interp->SetValue(0.f);
+	if (auto cl_wpn_sway_scale = H::ConVars.FindVar("cl_wpn_sway_scale"))
+		cl_wpn_sway_scale->SetValue(0.f);
 
 	Sleep(250);
 	F::EnginePrediction.Unload();
