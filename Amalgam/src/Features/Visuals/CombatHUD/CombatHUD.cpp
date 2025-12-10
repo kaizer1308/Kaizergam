@@ -84,26 +84,26 @@ void CCombatHUD::Draw(CTFPlayer* pLocal)
 	int iBarX = x - iPanelWidth / 2;
 	int iBarY = y;
 
-	H::Draw.FillRect(iBarX - 1, iBarY - 1, iPanelWidth + 2, iBarHeight + 2, Color_t(20, 20, 20, 255));
-	H::Draw.FillRect(iBarX, iBarY, iPanelWidth, iBarHeight, Color_t(50, 50, 50, 255));
+	H::Draw.FillRoundRect(iBarX - 1, iBarY - 1, iPanelWidth + 2, iBarHeight + 2, 5, Color_t(20, 20, 20, 100));
 
 	if (flCritRatio > 0.001f)
 	{
 		int iBarFillWidth = static_cast<int>(iPanelWidth * flCritRatio);
-		Color_t tColorStart = Color_t(100, 40, 140, 255);
-		Color_t tColorEnd = Color_t(200, 100, 220, 255);
-
-		for (int i = 0; i < iBarFillWidth; i++)
+		if (iBarFillWidth >= 5)
 		{
-			float t = static_cast<float>(i) / static_cast<float>(iPanelWidth);
-			Color_t tLerped = tColorStart.Lerp(tColorEnd, t);
-			H::Draw.FillRect(iBarX + i, iBarY, 1, iBarHeight, tLerped);
+			Color_t tColorStart = Color_t(100, 40, 140, 180);
+			Color_t tColorEnd = Color_t(200, 100, 220, 180);
+			Color_t tFillColor = tColorStart.Lerp(tColorEnd, flCritRatio);
+
+			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight, 5, tFillColor);
+			
+			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight / 2, 5, Color_t(255, 255, 255, 30));
 		}
-
-		H::Draw.FillRect(iBarX, iBarY, iBarFillWidth, iBarHeight / 3, Color_t(255, 180, 255, 50));
+		else if (iBarFillWidth > 0)
+		{
+			H::Draw.FillRect(iBarX, iBarY, iBarFillWidth, iBarHeight, Color_t(200, 100, 220, 180));
+		}
 	}
-
-	H::Draw.LineRect(iBarX - 1, iBarY - 1, iPanelWidth + 2, iBarHeight + 2, Color_t(80, 80, 80, 255));
 
 	y += iBarHeight + H::Draw.Scale(4, Scale_Round);
 
@@ -160,24 +160,24 @@ void CCombatHUD::Draw(CTFPlayer* pLocal)
 
 	iBarY = y;
 
-	H::Draw.FillRect(iBarX - 1, iBarY - 1, iPanelWidth + 2, iBarHeight + 2, Color_t(20, 20, 20, 255));
-	H::Draw.FillRect(iBarX, iBarY, iPanelWidth, iBarHeight, Color_t(50, 50, 50, 255));
+	H::Draw.FillRoundRect(iBarX - 1, iBarY - 1, iPanelWidth + 2, iBarHeight + 2, 5, Color_t(20, 20, 20, 100));
 
 	if (flTickRatio > 0.001f)
 	{
 		int iBarFillWidth = static_cast<int>(iPanelWidth * flTickRatio);
-		Color_t tColorStart = Color_t(40, 100, 140, 255);
-		Color_t tColorEnd = Color_t(100, 200, 240, 255);
-
-		for (int i = 0; i < iBarFillWidth; i++)
+		if (iBarFillWidth >= 5)
 		{
-			float t = static_cast<float>(i) / static_cast<float>(iPanelWidth);
-			Color_t tLerped = tColorStart.Lerp(tColorEnd, t);
-			H::Draw.FillRect(iBarX + i, iBarY, 1, iBarHeight, tLerped);
+			Color_t tColorStart = Color_t(40, 100, 140, 180);
+			Color_t tColorEnd = Color_t(100, 200, 240, 180);
+			Color_t tFillColor = tColorStart.Lerp(tColorEnd, flTickRatio);
+
+			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight, 5, tFillColor);
+
+			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight / 2, 5, Color_t(255, 255, 255, 30));
 		}
-
-		H::Draw.FillRect(iBarX, iBarY, iBarFillWidth, iBarHeight / 3, Color_t(180, 220, 255, 50));
+		else if (iBarFillWidth > 0)
+		{
+			H::Draw.FillRect(iBarX, iBarY, iBarFillWidth, iBarHeight, Color_t(100, 200, 240, 180));
+		}
 	}
-
-	H::Draw.LineRect(iBarX - 1, iBarY - 1, iPanelWidth + 2, iBarHeight + 2, Color_t(80, 80, 80, 255));
 }
