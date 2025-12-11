@@ -89,7 +89,7 @@ static inline void ModifyKeyValues(KeyValues* pKV)
 void CMaterials::LoadMaterials()
 {
 	// default materials
-	StoreStruct( // hacky
+	StoreStruct(
 		"None",
 			"\"UnlitGeneric\""
 			"\n{"

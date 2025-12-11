@@ -405,10 +405,16 @@ namespace Vars
 				None, PrioritizeTeam, PrioritizeFriends, FriendsOnly);
 			CVar(AutoHeal, "Auto heal", false);
 			CVar(AutoArrow, "Auto arrow", false);
+			CVar(AutoArrowHealthRatio, "Auto arrow health ratio", 0.6f, SLIDER_CLAMP | SLIDER_PRECISION, 0.1f, 1.f, 0.05f, "%g%%");
 			CVar(AutoRepair, "Auto repair", false);
 			CVar(AutoSandvich, "Auto sandvich", false);
 			CVar(AutoVaccinator, "Auto vaccinator", false);
 			CVar(ActivateOnVoice, "Activate on voice", false);
+			CVar(AutoVaccinatorSwapThreshold, "Auto vaccinator swap threshold", 0.15f, NOSAVE | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.5f, 0.05f);
+			CVar(AutoVaccinatorPopThreshold, "Auto vaccinator pop threshold", 1.f, NOSAVE | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 2.f, 0.05f);
+			CVar(AutoVaccinatorSwapCooldown, "Auto vaccinator swap cooldown", 0.25f, NOSAVE | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.5f, 0.05f, "%gs");
+			CVar(AutoVaccinatorHysteresis, "Auto vaccinator hysteresis", 0.1f, NOSAVE | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, 0.05f);
+			CVar(AutoVaccinatorIncludeTarget, "Auto vaccinator include target", true, NOSAVE | DEBUGVAR);
 
 			CVar(AutoVaccinatorBulletScale, "Auto vaccinator bullet scale", 100.f, NOSAVE | DEBUGVAR | SLIDER_MIN | SLIDER_PRECISION, 0.f, 200.f, 10.f, "%g%%");
 			CVar(AutoVaccinatorBlastScale, "Auto vaccinator blast scale", 100.f, NOSAVE | DEBUGVAR | SLIDER_MIN | SLIDER_PRECISION, 0.f, 200.f, 10.f, "%g%%");

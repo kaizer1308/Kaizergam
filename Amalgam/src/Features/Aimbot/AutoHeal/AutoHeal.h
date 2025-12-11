@@ -7,6 +7,7 @@ class CAutoHeal
 {
 private:
 	void AutoHeal(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd);
+	void AutoArrow(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
 	void ActivateOnVoice(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd);
 	void AutoVaccinator(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd);
 	void GetDangers(CTFPlayer* pTarget, bool bVaccinator, float& flBulletDanger, float& flBlastDanger, float& flFireDanger);
@@ -16,6 +17,7 @@ private:
 	int m_iResistType = -1;
 	float m_flChargeLevel = 0.f;
 	float m_flSwapTime = 0.f;
+	float m_flNextSwapAllowed = 0.f;
 	bool m_bPreventResistSwap = false;
 	bool m_bPreventResistCharge = false;
 
@@ -35,6 +37,10 @@ public:
 #endif
 
 	std::unordered_map<int, bool> m_mMedicCallers = {};
+
+	int m_iAutoArrowTarget = -1;
+	bool m_bAutoArrowActive = false;
+	int GetAutoArrowTarget() { return m_bAutoArrowActive ? m_iAutoArrowTarget : -1; }
 };
 
 ADD_FEATURE(CAutoHeal, AutoHeal);

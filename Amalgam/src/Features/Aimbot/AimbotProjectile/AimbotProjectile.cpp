@@ -7,6 +7,7 @@
 #include "../../Ticks/Ticks.h"
 #include "../../Visuals/Visuals.h"
 #include "../AutoAirblast/AutoAirblast.h"
+#include "../AutoHeal/AutoHeal.h"
 
 static inline const Vec3& GetSimulatedPos(const MoveStorage& tStorage)
 {
@@ -48,9 +49,13 @@ std::vector<Target_t> CAimbotProjectile::GetTargets(CTFPlayer* pLocal, CTFWeapon
 			break;
 		}
 		bool bHeal = pWeapon->GetWeaponID() == TF_WEAPON_CROSSBOW || pWeapon->GetWeaponID() == TF_WEAPON_LUNCHBOX;
+		int iAutoArrowTarget = F::AutoHeal.GetAutoArrowTarget();
 
 		for (auto pEntity : H::Entities.GetGroup(eGroupType))
 		{
+			if (iAutoArrowTarget != -1 && pEntity->entindex() != iAutoArrowTarget)
+				continue;
+
 			if (F::AimbotGlobal.ShouldIgnore(pEntity, pLocal, pWeapon))
 				continue;
 

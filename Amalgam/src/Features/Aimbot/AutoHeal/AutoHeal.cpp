@@ -5,6 +5,7 @@
 #include "../../CritHack/CritHack.h"
 #include "../../Simulation/ProjectileSimulation/ProjectileSimulation.h"
 #include "../AimbotProjectile/AimbotProjectile.h"
+#include <array>
 
 void CAutoHeal::AutoHeal(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd)
 {	// manage lagcomp
@@ -42,6 +43,7 @@ void CAutoHeal::ActivateOnVoice(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUse
 	auto pTarget = pWeapon->m_hHealingTarget().Get();
 	if (!pTarget
 		|| Vars::Aimbot::Healing::HealPriority.Value == Vars::Aimbot::Healing::HealPriorityEnum::FriendsOnly
+		&& !Vars::Aimbot::Healing::AutoVaccinatorIncludeTarget.Value
 		&& !H::Entities.IsFriend(pTarget->entindex()) && !H::Entities.InParty(pTarget->entindex()))
 		return;
 
@@ -338,6 +340,8 @@ void CAutoHeal::GetDangers(CTFPlayer* pTarget, bool bVaccinator, float& flBullet
 		{
 			flMult = flBulletResist > 0.f ? 1.f - flBulletResist : flMult + flBulletResist;
 			flDamage *= flMult * (pWeapon ? SDK::AttribHookValue(1, "mult_dmg", pWeapon) : 1);
+			if (pPlayer->m_nButtons() & IN_ATTACK)
+				flDamage *= 2.f;
 
 			float flSpread = std::clamp(pWeapon->GetWeaponSpread(), 0.001f, 1.f);
 			float flMappedCount = Math::RemapVal(flDistance, 20 / flSpread, 100 / flSpread, iBulletCount, 1);
@@ -471,10 +475,30 @@ void CAutoHeal::GetDangers(CTFPlayer* pTarget, bool bVaccinator, float& flBullet
 			|| pWeapon && !pWeapon->GetDamage())
 			continue;
 
+		if (pEntity->GetClassID() == ETFClassID::CTFGrenadePipebombProjectile)
+		{
+			auto pPipe = pEntity->As<CTFGrenadePipebombProjectile>();
+			if (pPipe->HasStickyEffects() && I::GlobalVars->curtime < pPipe->m_flCreationTime() + 0.8f)
+				continue;
+		}
+
 		Vec3 vVelocity = F::ProjSim.GetVelocity(pEntity);
 		float flRadius = F::AimbotProjectile.GetSplashRadius(pEntity, pWeapon, pOwner);
 
 		Vec3 vProjectileOrigin = PredictOrigin(pEntity->m_vecOrigin(), vVelocity, flLatency, true, pEntity->m_vecMins(), pEntity->m_vecMaxs());
+		float flDistTo = pTarget->m_vecOrigin().DistTo(vProjectileOrigin);
+
+		if (!vVelocity.IsZero() && (pEntity->GetClassID() == ETFClassID::CTFProjectile_Rocket || pEntity->GetClassID() == ETFClassID::CTFProjectile_Arrow || pEntity->GetClassID() == ETFClassID::CTFProjectile_Flare))
+		{
+			Vec3 vFutureOrigin = PredictOrigin(pEntity->m_vecOrigin(), vVelocity, flLatency + 0.5f, true, pEntity->m_vecMins(), pEntity->m_vecMaxs());
+			Vec3 vSeg = vFutureOrigin - vProjectileOrigin;
+			Vec3 vP = vTargetCenter - vProjectileOrigin;
+			float t = vSeg.Dot(vP) / vSeg.LengthSqr();
+			t = std::clamp(t, 0.f, 1.f);
+			Vec3 vClosest = vProjectileOrigin + vSeg * t;
+			flDistTo = std::min(flDistTo, vTargetCenter.DistTo(vClosest));
+		}
+
 		if (!TraceToEntity(pTarget, pEntity, vTargetEye, vProjectileOrigin, MASK_SHOT))
 			continue;
 
@@ -491,7 +515,7 @@ void CAutoHeal::GetDangers(CTFPlayer* pTarget, bool bVaccinator, float& flBullet
 
 		flRadius += vVelocity.Length() * flLatency + pTarget->GetSize().Length() / 2;
 		float flDamageDanger = flDamage / iPlayerHealth;
-		float flDistanceDanger = Math::RemapVal(pTarget->m_vecOrigin().DistTo(vProjectileOrigin), flRadius, flRadius, 1.f, 0.001f);
+		float flDistanceDanger = Math::RemapVal(flDistTo, flRadius, flRadius, 1.f, 0.001f);
 
 #ifdef DEBUG_VACCINATOR
 		G::SphereStorage.emplace_back(vProjectileOrigin, flRadius, 36, 36, I::GlobalVars->curtime + 60.f, Color_t(255, 255, 255, 1), Color_t(0, 0, 0, 0), true);
@@ -577,24 +601,33 @@ void CAutoHeal::AutoVaccinator(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUser
 #endif
 	if (m_iResistType == -1)
 		m_iResistType = pWeapon->GetResistType();
+
+	const float flSwapThreshold = Vars::Aimbot::Healing::AutoVaccinatorSwapThreshold.Value;
+	const float flPopThreshold = Vars::Aimbot::Healing::AutoVaccinatorPopThreshold.Value;
+	const float flSwapCooldown = Vars::Aimbot::Healing::AutoVaccinatorSwapCooldown.Value;
+	const float flHysteresis = Vars::Aimbot::Healing::AutoVaccinatorHysteresis.Value;
+	const bool bIncludeTarget = Vars::Aimbot::Healing::AutoVaccinatorIncludeTarget.Value;
+
+	std::array<float, 3> aResistDangers = { 0.f, 0.f, 0.f };
+
+	std::vector<CTFPlayer*> vTargets = { pLocal };
+	if (auto pTarget = pWeapon->m_hHealingTarget()->As<CTFPlayer>(); pTarget &&
+		(bIncludeTarget
+			|| Vars::Aimbot::Healing::HealPriority.Value != Vars::Aimbot::Healing::HealPriorityEnum::FriendsOnly
+			|| H::Entities.IsFriend(pTarget->entindex()) || H::Entities.InParty(pTarget->entindex())))
+		vTargets.push_back(pTarget);
+
+	for (auto pTarget : vTargets)
+		GetDangers(pTarget, true, aResistDangers[MEDIGUN_BULLET_RESIST], aResistDangers[MEDIGUN_BLAST_RESIST], aResistDangers[MEDIGUN_FIRE_RESIST]);
 #ifdef DEBUG_VACCINATOR
 	vResistDangers = {
 #else
 	std::vector<std::pair<float, int>> vResistDangers = {
 #endif
-		{ 0.f, MEDIGUN_BULLET_RESIST },
-		{ 0.f, MEDIGUN_BLAST_RESIST },
-		{ 0.f, MEDIGUN_FIRE_RESIST }
+		{ aResistDangers[MEDIGUN_BULLET_RESIST], MEDIGUN_BULLET_RESIST },
+		{ aResistDangers[MEDIGUN_BLAST_RESIST], MEDIGUN_BLAST_RESIST },
+		{ aResistDangers[MEDIGUN_FIRE_RESIST], MEDIGUN_FIRE_RESIST }
 	};
-
-	std::vector<CTFPlayer*> vTargets = { pLocal };
-	if (auto pTarget = pWeapon->m_hHealingTarget()->As<CTFPlayer>(); pTarget &&
-		(Vars::Aimbot::Healing::HealPriority.Value <= Vars::Aimbot::Healing::HealPriorityEnum::FriendsOnly
-		|| H::Entities.IsFriend(pTarget->entindex()) || H::Entities.InParty(pTarget->entindex())))
-		vTargets.push_back(pTarget);
-
-	for (auto pTarget : vTargets)
-		GetDangers(pTarget, true, vResistDangers[MEDIGUN_BULLET_RESIST].first, vResistDangers[MEDIGUN_BLAST_RESIST].first, vResistDangers[MEDIGUN_FIRE_RESIST].first);
 	std::sort(vResistDangers.begin(), vResistDangers.end(), [&](const std::pair<float, int>& a, const std::pair<float, int>& b) -> bool
 		{
 			return a.first > b.first;
@@ -602,9 +635,15 @@ void CAutoHeal::AutoVaccinator(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUser
 
 	int iTargetResist = vResistDangers.front().second;
 	float flTargetDanger = vResistDangers.front().first;
-	if (flTargetDanger)
+	float flCurrentDanger = m_iResistType >= 0 && m_iResistType < 3 ? aResistDangers[m_iResistType] : 0.f;
+
+	bool bWantsSwap = flTargetDanger >= flSwapThreshold && I::GlobalVars->curtime >= m_flNextSwapAllowed;
+	if (bWantsSwap && iTargetResist != m_iResistType && flHysteresis > 0.f && flTargetDanger < flCurrentDanger + flHysteresis)
+		bWantsSwap = false;
+	if (bWantsSwap && flTargetDanger > 0.f)
 		SwapResistType(pCmd, iTargetResist);
-	if (flTargetDanger >= 1.f)
+
+	if (flTargetDanger >= flPopThreshold)
 		ActivateResistType(pCmd, iTargetResist);
 
 	if (m_bPreventResistSwap)
@@ -615,19 +654,84 @@ void CAutoHeal::AutoVaccinator(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUser
 	{
 		m_iResistType = (m_iResistType + 1) % 3;
 		m_flSwapTime = I::GlobalVars->curtime + F::Backtrack.GetReal(MAX_FLOWS, false) * 1.5f + 0.1f;
+		m_flNextSwapAllowed = I::GlobalVars->curtime + flSwapCooldown;
 	}
 	if (m_flSwapTime < I::GlobalVars->curtime)
 		m_iResistType = pWeapon->GetResistType();
 	m_flChargeLevel = pWeapon->m_flChargeLevel();
 }
 
+void CAutoHeal::AutoArrow(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
+{
+	if (!Vars::Aimbot::Healing::AutoArrow.Value)
+		return;
+
+	CWeaponMedigun* pMedigun = nullptr;
+	CTFWeaponBase* pCrossbow = nullptr;
+
+	for (auto& hWeapon : pLocal->m_hMyWeapons())
+	{
+		auto pWep = hWeapon.Get()->As<CTFWeaponBase>();
+		if (!pWep) continue;
+
+		if (pWep->GetWeaponID() == TF_WEAPON_MEDIGUN)
+			pMedigun = pWep->As<CWeaponMedigun>();
+		else if (pWep->GetWeaponID() == TF_WEAPON_CROSSBOW)
+			pCrossbow = pWep;
+	}
+
+	if (!pMedigun || !pCrossbow)
+		return;
+
+	if (pWeapon->GetWeaponID() == TF_WEAPON_MEDIGUN)
+	{
+		auto pTarget = pMedigun->m_hHealingTarget().Get()->As<CTFPlayer>();
+		if (pTarget && pTarget->IsAlive() && !pTarget->IsAGhost())
+		{
+			float flHealthRatio = (float)pTarget->m_iHealth() / (float)pTarget->GetMaxHealth();
+			if (flHealthRatio < Vars::Aimbot::Healing::AutoArrowHealthRatio.Value)
+			{
+				if (pCrossbow->m_iClip1() > 0)
+				{
+					m_iAutoArrowTarget = pTarget->entindex();
+					m_bAutoArrowActive = true;
+					pCmd->weaponselect = pCrossbow->entindex();
+				}
+			}
+		}
+	}
+	else if (pWeapon->GetWeaponID() == TF_WEAPON_CROSSBOW)
+	{
+		if (m_bAutoArrowActive)
+		{
+			auto pTarget = I::ClientEntityList->GetClientEntity(m_iAutoArrowTarget)->As<CTFPlayer>();
+			bool bTargetValid = pTarget && pTarget->IsAlive() && !pTarget->IsAGhost();
+
+			if (!bTargetValid || pWeapon->m_iClip1() == 0)
+			{
+				m_bAutoArrowActive = false;
+				m_iAutoArrowTarget = -1;
+				pCmd->weaponselect = pMedigun->entindex();
+			}
+		}
+	}
+	else
+	{
+		m_bAutoArrowActive = false;
+		m_iAutoArrowTarget = -1;
+	}
+}
+
 void CAutoHeal::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	AutoArrow(pLocal, pWeapon, pCmd);
+
 	if (pWeapon->GetWeaponID() != TF_WEAPON_MEDIGUN)
 	{
 		m_mMedicCallers.clear();
 		m_iResistType = -1;
 		m_flDamagedTime = 0.f;
+		m_flNextSwapAllowed = 0.f;
 		return;
 	}
 
@@ -661,10 +765,12 @@ void CAutoHeal::Event(IGameEvent* pEvent, uint32_t uHash)
 		bool bMinicrit = pEvent->GetBool("minicrit");
 
 		int iTarget = pWeapon->m_hHealingTarget().GetEntryIndex();
-		if (iVictim == iAttacker || iVictim != I::EngineClient->GetLocalPlayer()
-			&& (iVictim != iTarget
-				|| Vars::Aimbot::Healing::HealPriority.Value == Vars::Aimbot::Healing::HealPriorityEnum::FriendsOnly
-				&& !H::Entities.IsFriend(iTarget) && !H::Entities.InParty(iTarget)))
+		int iLocal = I::EngineClient->GetLocalPlayer();
+		bool bFriendsOnlyBlocked = Vars::Aimbot::Healing::HealPriority.Value == Vars::Aimbot::Healing::HealPriorityEnum::FriendsOnly
+			&& !Vars::Aimbot::Healing::AutoVaccinatorIncludeTarget.Value
+			&& !H::Entities.IsFriend(iTarget) && !H::Entities.InParty(iTarget);
+		if (iVictim == iAttacker || iVictim != iLocal
+			&& (iVictim != iTarget || bFriendsOnlyBlocked))
 			return;
 
 		auto pEntity = I::ClientEntityList->GetClientEntity(iAttacker)->As<CTFPlayer>();

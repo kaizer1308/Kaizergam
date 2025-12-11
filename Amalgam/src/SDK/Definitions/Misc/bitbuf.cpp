@@ -1393,7 +1393,7 @@ void bf_read::ReadBitAngles(Vec3& fa)
 {
 	Vec3 tmp;
 	ReadBitVec3Coord(tmp);
-	//fa(tmp.x, tmp.y, tmp.z);
+	fa = tmp;
 }
 
 int64_t bf_read::ReadLongLong()
