@@ -1552,7 +1552,7 @@ int CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBas
 
 			float flDist = bSplash ? tTarget.m_vPos.DistTo(vPoint.m_vPoint) : flLowestDist;
 			bool bPriority = iPriority <= iLowestPriority;
-			bool bTime = bSplash || m_tInfo.m_iPrimeTime < i || tStorage.m_MoveData.m_vecVelocity.IsZero();
+			bool bTime = bSplash || i > 0 || tStorage.m_MoveData.m_vecVelocity.IsZero();
 			bool bDist = true;
 
 			if (!bSplash && !bPriority)
