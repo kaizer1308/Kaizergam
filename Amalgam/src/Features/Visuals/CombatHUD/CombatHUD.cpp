@@ -96,8 +96,6 @@ void CCombatHUD::Draw(CTFPlayer* pLocal)
 			Color_t tFillColor = tColorStart.Lerp(tColorEnd, flCritRatio);
 
 			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight, 5, tFillColor);
-			
-			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight / 2, 5, Color_t(255, 255, 255, 30));
 		}
 		else if (iBarFillWidth > 0)
 		{
@@ -172,8 +170,6 @@ void CCombatHUD::Draw(CTFPlayer* pLocal)
 			Color_t tFillColor = tColorStart.Lerp(tColorEnd, flTickRatio);
 
 			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight, 5, tFillColor);
-
-			H::Draw.FillRoundRect(iBarX, iBarY, iBarFillWidth, iBarHeight / 2, 5, Color_t(255, 255, 255, 30));
 		}
 		else if (iBarFillWidth > 0)
 		{
