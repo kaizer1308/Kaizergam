@@ -288,13 +288,18 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 		float flNewChance = 1.f;
 		if (dbTotalWeight > 0.0)
 			flNewChance = static_cast<float>(1.0 - std::clamp(dbDevWeight / dbTotalWeight, 0.0, 1.0));
-
+		
 		float flCurrentChance = flLegacyChance;
+		if (dbTotalWeight > 0.0)
+		{
+			constexpr float flBlend = 0.35f;
+			flCurrentChance = std::clamp(flLegacyChance + (flNewChance - flLegacyChance) * flBlend, 0.f, 1.f);
+		}
 		if (flCurrentChance < Vars::Aimbot::Projectile::HitChance.Value / 100)
 		{
 			if (Vars::Debug::Logging.Value)
 			{
-				SDK::Output("MovementSimulation", std::format("Hitchance (legacy {}% < {}%, new {}%)", flCurrentChance * 100, Vars::Aimbot::Projectile::HitChance.Value, flNewChance * 100).c_str(), { 80, 200, 120 }, true);
+				SDK::Output("MovementSimulation", std::format("Hitchance (current {}% < {}%, legacy {}%, new {}%)", flCurrentChance * 100, Vars::Aimbot::Projectile::HitChance.Value, flLegacyChance * 100, flNewChance * 100).c_str(), { 80, 200, 120 }, true);
 			}
 
 			tStorage.m_bFailed = true;
@@ -498,6 +503,7 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 
 	bool bGround = tStorage.m_bDirectMove; int iMinimumStrafes = 4;
 	float flMaxSpeed = SDK::MaxSpeed(tStorage.m_pPlayer, false, true);
+
 	float flLowMinimumDistance = bGround ? Vars::Aimbot::Projectile::GroundLowMinimumDistance.Value : Vars::Aimbot::Projectile::AirLowMinimumDistance.Value;
 	float flLowMinimumSamples = bGround ? Vars::Aimbot::Projectile::GroundLowMinimumSamples.Value : Vars::Aimbot::Projectile::AirLowMinimumSamples.Value;
 	float flHighMinimumDistance = bGround ? Vars::Aimbot::Projectile::GroundHighMinimumDistance.Value : Vars::Aimbot::Projectile::AirHighMinimumDistance.Value;
@@ -510,6 +516,7 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 
 	iSamples = std::min(iSamples, int(vRecords.size()));
 	size_t i = 1;
+	int iValidStrafes = 0;
 
 	float flYaw1 = Math::VectorAngles(vRecords[0].m_vDirection).y;
 	for (; i < iSamples; i++)
@@ -517,13 +524,21 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 		auto& tRecord1 = vRecords[i - 1];
 		auto& tRecord2 = vRecords[i];
 		if (tRecord1.m_iMode != tRecord2.m_iMode)
-			break;
+		{
+			state = {};
+			flYaw1 = Math::VectorAngles(tRecord2.m_vDirection).y;
+			continue;
+		}
 
 		const float flDeltaTime = std::max(tRecord1.m_flSimTime - tRecord2.m_flSimTime, 0.f);
 		if (flDeltaTime <= 0.f)
 			continue;
 		if (flDeltaTime > flMaxRecordGap)
-			break;
+		{
+			state = {};
+			flYaw1 = Math::VectorAngles(tRecord2.m_vDirection).y;
+			continue;
+		}
 
 		float flYaw2 = Math::VectorAngles(tRecord2.m_vDirection).y;
 
@@ -548,16 +563,21 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 		flYaw1 = flYaw2; // Cache for next iteration
 
 		if (!bResult)
-			break;
+		{
+			state = {};
+			continue;
+		}
 
 		const int iTicks = std::max(TIME_TO_TICKS(flDeltaTime), 1);
 
 		const float flYawRate = flYaw / iTicks;
+		++iValidStrafes;
 		const double dbWeight = flSpeed * flDeltaTime * std::exp(-dbAccumulatedTime * MoveSimConstants::WEIGHT_EXP_DECAY); // weight yaw by speed and time
 		dbWeightedYaw += flYawRate * dbWeight;
 		dbTotalWeight += dbWeight;
 		dbAccumulatedTime += flDeltaTime;
 	}
+
 #ifdef VISUALIZE_RECORDS
 	size_t i2 = i; for (; i2 < iSamples; i2++)
 	{
@@ -567,18 +587,8 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 		float flStraightFuzzyValue = bGround ? Vars::Aimbot::Projectile::GroundStraightFuzzyValue.Value : Vars::Aimbot::Projectile::AirStraightFuzzyValue.Value;
 		VisualizeRecords(tRecord1, tRecord2, { 0, 0, 0, 100 }, flStraightFuzzyValue);
 	}
-	/*
-	for (; i2 < vRecords.size(); i2++)
-	{
-		auto& tRecord1 = vRecords[i2 - 1];
-		auto& tRecord2 = vRecords[i2];
-
-		float flStraightFuzzyValue = bGround ? Vars::Aimbot::Projectile::GroundStraightFuzzyValue.Value : Vars::Aimbot::Projectile::AirStraightFuzzyValue.Value;
-		VisualizeRecords(tRecord1, tRecord2, { 0, 0, 0, 100 }, flStraightFuzzyValue);
-	}
-	*/
 #endif
-	if (i <= size_t(iMinimumStrafes)) // valid strafes not high enough
+	if (iValidStrafes < iMinimumStrafes) // valid strafes not high enough
 		return;
 
 	int iMinimum = flLowMinimumSamples;
@@ -592,13 +602,14 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 
 	// demand both weight and meaningful time covered; clamp minimum by ticks of collected weight
 	const int iCollectedTicks = std::max(TIME_TO_TICKS(float(dbTotalWeight) / std::max(flMaxSpeed, 1.f)), 1);
-	if (dbTotalWeight < iMinimum || iCollectedTicks < iMinimum)
+	if (iCollectedTicks < iMinimum || dbTotalWeight <= 0.0)
 		return;
 
 	float flAverageYaw = static_cast<float>(dbWeightedYaw / dbTotalWeight);
+	
 	if (fabsf(flAverageYaw) < 0.2f)
 		return;
-
+	
 	tStorage.m_flAverageYaw = flAverageYaw;
 	SDK::Output("MovementSimulation", std::format("flAverageYaw calculated to {} with weight {:.2f} (min {} {})", flAverageYaw, dbTotalWeight, iMinimum, pPlayer->entindex() == I::EngineClient->GetLocalPlayer() ? "local" : "remote").c_str(), { 100, 255, 150 }, Vars::Debug::Logging.Value);
 }
