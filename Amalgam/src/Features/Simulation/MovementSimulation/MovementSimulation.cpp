@@ -1,6 +1,8 @@
 #include "MovementSimulation.h"
 
 #include "../../EnginePrediction/EnginePrediction.h"
+#include "../../../SDK/Helpers/Draw/Draw.h"
+#include <cmath>
 #include <numeric>
 
 namespace MoveSimConstants
@@ -12,7 +14,222 @@ namespace MoveSimConstants
 	constexpr float VELOCITY_THRESHOLD = 0.015f;
 }
 
+static constexpr bool kDebugStrafeOverlay = true;
+
+namespace
+{
+	class CCircleStrafePredictor
+	{
+	private:
+		bool PointsSane(const std::vector<Vec3>& vWorldPoints, float& flDir) const
+		{
+			if (vWorldPoints.size() < 3)
+				return false;
+
+			for (size_t n = 0; n < vWorldPoints.size(); n++)
+			{
+				for (size_t j = n + 1; j < vWorldPoints.size(); j++)
+				{
+					if (vWorldPoints[n].DistTo(vWorldPoints[j]) < 1.5f)
+						return false;
+				}
+			}
+
+			float flPrevDiff = 0.0f;
+			bool bFirstDiff = true;
+
+			for (size_t n = 0; n + 2 < vWorldPoints.size(); n++)
+			{
+				const float flYaw0 = Math::CalcAngle(vWorldPoints[n], vWorldPoints[n + 1]).y;
+				const float flYaw1 = Math::CalcAngle(vWorldPoints[n + 1], vWorldPoints[n + 2]).y;
+
+				if (fabsf(flYaw1 - flYaw0) < 0.2f)
+					return false;
+
+				const float flCurDiff = flYaw1 - flYaw0;
+
+				if (!bFirstDiff)
+				{
+					if ((flCurDiff > 0.0f && flPrevDiff < 0.0f) || (flCurDiff < 0.0f && flPrevDiff > 0.0f))
+						return false;
+				}
+
+				flPrevDiff = flCurDiff;
+				bFirstDiff = false;
+			}
+
+			if (flPrevDiff > 0.0f)
+				flDir = -1.0f;
+			else if (flPrevDiff < 0.0f)
+				flDir = 1.0f;
+
+			return true;
+		}
+
+		bool ProjectAndNormalizePoints(const std::vector<Vec3>& vWorldPoints, Vec3& vOffset, std::vector<Vec2>& vPoints) const
+		{
+			if (vWorldPoints.size() < 3)
+				return false;
+
+			Vec3 vCentroid{};
+			for (const Vec3& vPoint : vWorldPoints)
+				vCentroid += vPoint;
+
+			vOffset = vCentroid / static_cast<float>(vWorldPoints.size());
+
+			for (const Vec3& vPoint : vWorldPoints)
+				vPoints.emplace_back(vPoint.x - vOffset.x, vPoint.y - vOffset.y);
+
+			return true;
+		}
+
+		bool FitCircleToPoints(const std::vector<Vec2>& vPoints, float& flCx, float& flCy, float& flCr) const
+		{
+			if (vPoints.size() < 3)
+				return false;
+
+			float flSumX = 0.0f, flSumY = 0.0f, flSumX2 = 0.0f, flSumY2 = 0.0f, flSumXY = 0.0f;
+			float flSumX3 = 0.0f, flSumY3 = 0.0f, flSumX1Y2 = 0.0f, flSumX2Y1 = 0.0f;
+
+			for (const Vec2& tPoint : vPoints)
+			{
+				const float flX = tPoint.x;
+				const float flY = tPoint.y;
+				const float flX2 = flX * flX;
+				const float flY2 = flY * flY;
+				const float flXY = flX * flY;
+				const float flX3 = flX2 * flX;
+				const float flY3 = flY2 * flY;
+				const float flX1Y2 = flX * flY2;
+				const float flX2Y1 = flX2 * flY;
+
+				flSumX += flX;
+				flSumY += flY;
+				flSumX2 += flX2;
+				flSumY2 += flY2;
+				flSumXY += flXY;
+				flSumX3 += flX3;
+				flSumY3 += flY3;
+				flSumX1Y2 += flX1Y2;
+				flSumX2Y1 += flX2Y1;
+			}
+
+			const float flN = static_cast<float>(vPoints.size());
+
+			const float flC = flN * flSumX2 - flSumX * flSumX;
+			const float flD = flN * flSumXY - flSumX * flSumY;
+			const float flE = flN * flSumX3 + flN * flSumX1Y2 - (flSumX2 + flSumY2) * flSumX;
+			const float flG = flN * flSumY2 - flSumY * flSumY;
+			const float flH = flN * flSumY3 + flN * flSumX2Y1 - (flSumX2 + flSumY2) * flSumY;
+
+			const float flA = (flH * flD - flE * flG) / (flC * flG - flD * flD);
+			const float flB = (flH * flC - flE * flD) / (flD * flD - flG * flC);
+			const float flC0 = -(flA * flSumX + flB * flSumY + flSumX2 + flSumY2) / flN;
+
+			flCx = flA / -2.0f;
+			flCy = flB / -2.0f;
+			flCr = sqrtf(flA * flA + flB * flB - 4.0f * flC0) / 2.0f;
+
+			return true;
+		}
+
+		bool GenerateCirclePoints(float flCx, float flCy, float flCr, float flZ, const Vec3& vOffset, int iSamples, std::vector<Vec3>& vOut) const
+		{
+			if (flCr < 5.0f)
+				return false;
+
+			for (int i = 0; i < iSamples; i++)
+			{
+				const float flAngle = 2.0f * static_cast<float>(PI) * static_cast<float>(i) / static_cast<float>(iSamples);
+				vOut.emplace_back(flCx + flCr * cosf(flAngle) + vOffset.x, flCy + flCr * sinf(flAngle) + vOffset.y, flZ);
+			}
+
+			return true;
+		}
+
+	public:
+		bool Calc(const std::vector<Vec3>& vPoints, float flPlayerSpeed, float& flYawPerTick, Vec3* pCenter = nullptr, float* pRadius = nullptr, std::vector<Vec3>* pCirclePts = nullptr) const
+		{
+			float flStrafeDir = 0.0f;
+
+			if (!PointsSane(vPoints, flStrafeDir))
+				return false;
+
+			Vec3 vOffset{};
+			std::vector<Vec2> vNormalizedPoints{};
+			vNormalizedPoints.reserve(vPoints.size());
+
+			if (!ProjectAndNormalizePoints(vPoints, vOffset, vNormalizedPoints))
+				return false;
+
+			float flCx = 0.0f, flCy = 0.0f, flCr = 0.0f;
+
+			if (!FitCircleToPoints(vNormalizedPoints, flCx, flCy, flCr))
+				return false;
+			if (flCr < 5.0f)
+				return false;
+
+			if (pCenter)
+				*pCenter = Vec3(flCx + vOffset.x, flCy + vOffset.y, vPoints.front().z);
+			if (pRadius)
+				*pRadius = flCr;
+			if (pCirclePts)
+			{
+				pCirclePts->clear();
+				pCirclePts->reserve(64);
+				GenerateCirclePoints(flCx, flCy, flCr, vPoints.front().z, vOffset, 64, *pCirclePts);
+			}
+
+			flYawPerTick = std::clamp((flPlayerSpeed / flCr) * flStrafeDir, -5.0f, 5.0f);
+			return true;
+		}
+	};
+}
+
 static CUserCmd s_tDummyCmd = {};
+
+class CScopedBounds
+{
+public:
+	CScopedBounds(CTFPlayer* pPlayer) : m_pPlayer(pPlayer)
+	{
+		if (!m_pPlayer || m_pPlayer->entindex() == I::EngineClient->GetLocalPlayer())
+			return;
+
+		if (auto pGameRules = I::TFGameRules())
+		{
+			if (auto pViewVectors = pGameRules->GetViewVectors())
+			{
+				m_pViewVectors = pViewVectors;
+				m_vHullMin = pViewVectors->m_vHullMin;
+				m_vHullMax = pViewVectors->m_vHullMax;
+				m_vDuckHullMin = pViewVectors->m_vDuckHullMin;
+				m_vDuckHullMax = pViewVectors->m_vDuckHullMax;
+
+				pViewVectors->m_vHullMin = Vec3(-24, -24, 0) + 0.125f;
+				pViewVectors->m_vHullMax = Vec3(24, 24, 82) - 0.125f;
+				pViewVectors->m_vDuckHullMin = Vec3(-24, -24, 0) + 0.125f;
+				pViewVectors->m_vDuckHullMax = Vec3(24, 24, 62) - 0.125f;
+			}
+		}
+	}
+
+	~CScopedBounds()
+	{
+		if (m_pViewVectors)
+		{
+			m_pViewVectors->m_vHullMin = m_vHullMin;
+			m_pViewVectors->m_vHullMax = m_vHullMax;
+			m_pViewVectors->m_vDuckHullMin = m_vDuckHullMin;
+			m_pViewVectors->m_vDuckHullMax = m_vDuckHullMax;
+		}
+	}
+
+private:
+	CTFPlayer* m_pPlayer = nullptr;
+	CViewVectors* m_pViewVectors = nullptr;
+	Vec3 m_vHullMin, m_vHullMax, m_vDuckHullMin, m_vDuckHullMax;
+};
 
 void CMovementSimulation::Store(MoveStorage& tStorage)
 {
@@ -144,6 +361,8 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 	// store restore data
 	Store(tStorage);
 
+	tStorage.m_pScopedBounds = new CScopedBounds(tStorage.m_pPlayer);
+
 	// the hacks that make it work
 	I::MoveHelper->SetHost(pPlayer);
 	pPlayer->m_pCurrentCommand() = &s_tDummyCmd;
@@ -175,6 +394,7 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 	if (!SetupMoveData(tStorage))
 	{
 		tStorage.m_bFailed = true;
+		Restore(tStorage);
 		return false;
 	}
 
@@ -196,6 +416,7 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 		if (vRecords.empty())
 		{
 			tStorage.m_bFailed = true;
+			Restore(tStorage);
 			return false;
 		}
 
@@ -303,6 +524,7 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 			}
 
 			tStorage.m_bFailed = true;
+			Restore(tStorage);
 			return false;
 		}
 	}
@@ -399,49 +621,6 @@ static inline float GetFrictionScale(float flVelocityXY, float flTurn, float flV
 	// entity friction will be 0.25f if velocity is between 0.f and 250.f
 	return Math::RemapVal(fabsf(flVelocityXY * flTurn), flMin, flMax, 1.f, 0.25f);
 }
-
-class CScopedBounds
-{
-public:
-	CScopedBounds(CTFPlayer* pPlayer) : m_pPlayer(pPlayer)
-	{
-		if (!m_pPlayer || m_pPlayer->entindex() == I::EngineClient->GetLocalPlayer())
-			return;
-
-		if (auto pGameRules = I::TFGameRules())
-		{
-			if (auto pViewVectors = pGameRules->GetViewVectors())
-			{
-				m_pViewVectors = pViewVectors;
-				m_vHullMin = pViewVectors->m_vHullMin;
-				m_vHullMax = pViewVectors->m_vHullMax;
-				m_vDuckHullMin = pViewVectors->m_vDuckHullMin;
-				m_vDuckHullMax = pViewVectors->m_vDuckHullMax;
-
-				pViewVectors->m_vHullMin = Vec3(-24, -24, 0) + 0.125f;
-				pViewVectors->m_vHullMax = Vec3(24, 24, 82) - 0.125f;
-				pViewVectors->m_vDuckHullMin = Vec3(-24, -24, 0) + 0.125f;
-				pViewVectors->m_vDuckHullMax = Vec3(24, 24, 62) - 0.125f;
-			}
-		}
-	}
-
-	~CScopedBounds()
-	{
-		if (m_pViewVectors)
-		{
-			m_pViewVectors->m_vHullMin = m_vHullMin;
-			m_pViewVectors->m_vHullMax = m_vHullMax;
-			m_pViewVectors->m_vDuckHullMin = m_vDuckHullMin;
-			m_pViewVectors->m_vDuckHullMax = m_vDuckHullMax;
-		}
-	}
-
-private:
-	CTFPlayer* m_pPlayer = nullptr;
-	CViewVectors* m_pViewVectors = nullptr;
-	Vec3 m_vHullMin, m_vHullMax, m_vDuckHullMin, m_vDuckHullMax;
-};
 
 struct StrafeDataState
 {
@@ -621,8 +800,65 @@ bool CMovementSimulation::StrafePrediction(MoveStorage& tStorage, int iSamples)
 		: !(Vars::Aimbot::Projectile::StrafePrediction.Value & Vars::Aimbot::Projectile::StrafePredictionEnum::Air))
 		return false;
 
-	GetAverageYaw(tStorage, iSamples);
-	return true;
+	tStorage.m_flAverageYaw = 0.f;
+	tStorage.m_bCircleStrafe = false;
+	tStorage.m_vCircleDebug.clear();
+	tStorage.m_vStrafeSamples.clear();
+
+	static CCircleStrafePredictor s_CirclePredictor = {};
+	const auto& vRecords = m_mRecords[tStorage.m_pPlayer->entindex()];
+	constexpr size_t iMaxPoints = 5;
+	const size_t iPointCount = std::min(vRecords.size(), iMaxPoints);
+
+	if (iPointCount == iMaxPoints)
+	{
+		std::vector<Vec3> vPoints{};
+		vPoints.reserve(iPointCount);
+
+		for (size_t i = 0; i < iPointCount; i++)
+			vPoints.push_back(vRecords[i].m_vOrigin);
+
+		tStorage.m_vStrafeSamples = vPoints;
+
+		float flYawPerTick = 0.0f;
+		Vec3 vCenter{};
+		float flRadius = 0.f;
+		std::vector<Vec3> vCircle{};
+		if (s_CirclePredictor.Calc(vPoints, tStorage.m_MoveData.m_vecVelocity.Length2D(), flYawPerTick, &vCenter, &flRadius, &vCircle))
+		{
+			tStorage.m_flAverageYaw = flYawPerTick;
+			tStorage.m_bCircleStrafe = true;
+			tStorage.m_vCircleCenter = vCenter;
+			tStorage.m_flCircleRadius = flRadius;
+			tStorage.m_vCircleDebug = std::move(vCircle);
+
+			SDK::Output("MovementSimulation",
+				std::format("Circle strafe engaged for ent {} ({}): yawPerTick = {:.3f}, radius = {:.1f}",
+					tStorage.m_pPlayer->entindex(),
+					tStorage.m_bDirectMove ? "ground/surface" : "air",
+					flYawPerTick,
+					flRadius).c_str(),
+				{ 120, 200, 255 },
+				Vars::Debug::Logging.Value);
+
+			if (kDebugStrafeOverlay)
+			{
+				for (size_t i = 1; i < tStorage.m_vCircleDebug.size(); i++)
+					H::Draw.RenderLine(tStorage.m_vCircleDebug[i - 1], tStorage.m_vCircleDebug[i], { 255, 255, 255, 100 }, true);
+				if (!tStorage.m_vCircleDebug.empty())
+					H::Draw.RenderLine(tStorage.m_vCircleDebug.back(), tStorage.m_vCircleDebug.front(), { 255, 255, 255, 100 }, true);
+
+				for (size_t i = 1; i < tStorage.m_vStrafeSamples.size(); i++)
+					H::Draw.RenderLine(tStorage.m_vStrafeSamples[i - 1], tStorage.m_vStrafeSamples[i], { 100, 200, 255, 180 }, false);
+			}
+
+			return true;
+		}
+	}
+
+	// Circle fit failed or not enough history: no strafe prediction this time.
+	// This matches seo64, which does not fall back to a secondary estimator.
+	return false;
 }
 
 bool CMovementSimulation::SetDuck(MoveStorage& tStorage, bool bDuck) // this only touches origin, bounds
@@ -661,7 +897,6 @@ bool CMovementSimulation::SetDuck(MoveStorage& tStorage, bool bDuck) // this onl
 	return true;
 }
 
-
 void CMovementSimulation::RunTick(MoveStorage& tStorage, bool bPath, std::function<void(CMoveData&)>* pCallback)
 {
 	if (tStorage.m_bFailed || !tStorage.m_pPlayer || !tStorage.m_pPlayer->IsPlayer())
@@ -677,8 +912,6 @@ void CMovementSimulation::RunTick(MoveStorage& tStorage, bool bPath, std::functi
 	I::Prediction->m_bFirstTimePredicted = false;
 	I::GlobalVars->frametime = I::Prediction->m_bEnginePaused ? 0.f : TICK_INTERVAL;
 	
-	CScopedBounds scopedBounds(tStorage.m_pPlayer);
-
 	float flAppliedYaw = 0.f;
 	if (tStorage.m_flAverageYaw)
 	{
@@ -691,9 +924,15 @@ void CMovementSimulation::RunTick(MoveStorage& tStorage, bool bPath, std::functi
 
 		flAppliedYaw = tStorage.m_flAverageYaw * flMult;
 		tStorage.m_MoveData.m_vecViewAngles.y += flAppliedYaw;
+
+		if (tStorage.m_bCircleStrafe && !tStorage.m_bDirectMove)
+		{
+			tStorage.m_MoveData.m_flForwardMove = 0.f;
+			tStorage.m_MoveData.m_flSideMove = (tStorage.m_flAverageYaw > 0.f) ? -MoveSimConstants::MAX_MOVEMENT_SPEED : MoveSimConstants::MAX_MOVEMENT_SPEED;
+		}
 	}
-	else if (!tStorage.m_bDirectMove)
-		tStorage.m_MoveData.m_flForwardMove = tStorage.m_MoveData.m_flSideMove = 0.f;
+	/*else if (!tStorage.m_bDirectMove)
+		tStorage.m_MoveData.m_flForwardMove = tStorage.m_MoveData.m_flSideMove = 0.f;*/
 
 	float flOldSpeed = tStorage.m_MoveData.m_flClientMaxSpeed;
 	if (tStorage.m_pPlayer->m_bDucked() && tStorage.m_pPlayer->IsOnGround() && !tStorage.m_pPlayer->IsSwimming())
@@ -746,6 +985,12 @@ void CMovementSimulation::Restore(MoveStorage& tStorage)
 
 	I::MoveHelper->SetHost(nullptr);
 	tStorage.m_pPlayer->m_pCurrentCommand() = nullptr;
+
+	if (tStorage.m_pScopedBounds)
+	{
+		delete static_cast<CScopedBounds*>(tStorage.m_pScopedBounds);
+		tStorage.m_pScopedBounds = nullptr;
+	}
 
 	Reset(tStorage);
 

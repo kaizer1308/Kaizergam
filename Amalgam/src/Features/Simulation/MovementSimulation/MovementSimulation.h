@@ -1,6 +1,7 @@
 #pragma once
 #include "../../../SDK/SDK.h"
 #include <functional>
+#include <vector>
 
 struct MoveStorage
 {
@@ -9,7 +10,13 @@ struct MoveStorage
 	byte* m_pData = nullptr;
 
 	float m_flAverageYaw = 0.f;
+	bool m_bCircleStrafe = false;
 	bool m_bBunnyHop = false;
+
+	Vec3 m_vCircleCenter = {};
+	float m_flCircleRadius = 0.f;
+	std::vector<Vec3> m_vCircleDebug = {};
+	std::vector<Vec3> m_vStrafeSamples = {};
 
 	float m_flSimTime = 0.f;
 	float m_flPredictedDelta = 0.f;
@@ -23,6 +30,8 @@ struct MoveStorage
 
 	bool m_bFailed = false;
 	bool m_bInitFailed = false;
+
+	void* m_pScopedBounds = nullptr;
 };
 
 struct MoveData
