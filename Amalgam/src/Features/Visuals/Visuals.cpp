@@ -74,8 +74,11 @@ void CVisuals::ProjectileTrace(CTFPlayer* pPlayer, CTFWeaponBase* pWeapon, const
 	CGameTrace trace = {};
 	CTraceFilterCollideable filter = {};
 	filter.pSkip = pPlayer;
+	if (bQuick)
+		filter.iPlayer = PLAYER_NONE;
 	int nMask = MASK_SOLID;
-	F::ProjSim.SetupTrace(filter, nMask, pWeapon, 0, bQuick);
+	const bool bQuickForTrace = bQuick ? false : bQuick;
+	F::ProjSim.SetupTrace(filter, nMask, pWeapon, 0, bQuickForTrace);
 	Vec3* pNormal = nullptr;
 
 	int iTicks = TIME_TO_TICKS(std::min(tProjInfo.m_flLifetime, 10.f));
@@ -87,7 +90,7 @@ void CVisuals::ProjectileTrace(CTFPlayer* pPlayer, CTFWeaponBase* pWeapon, const
 
 		SDK::TraceHull(Old, New, tProjInfo.m_vHull * -1, tProjInfo.m_vHull, nMask, &filter, &trace);
 		F::ProjSim.ApplyTraceResult(trace);
-		F::ProjSim.SetupTrace(filter, nMask, pWeapon, n, bQuick);
+		F::ProjSim.SetupTrace(filter, nMask, pWeapon, n, bQuickForTrace);
 		if (trace.DidHit())
 		{
 			pNormal = &trace.plane.normal;
