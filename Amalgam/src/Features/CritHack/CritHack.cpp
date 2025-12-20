@@ -570,6 +570,18 @@ MAKE_HOOK(CTFGameStats_FindPlayerStats, S::CTFGameStats_FindPlayerStats(), void*
 }
 #endif
 
+// im a retard, so lets manually blend them colors
+Color_t BlendColors(const Color_t& a, const Color_t& b, float ratio)
+{
+    ratio = std::clamp(ratio, 0.0f, 1.0f);
+    return Color_t(
+        a.r + (b.r - a.r) * ratio,
+        a.g + (b.g - a.g) * ratio,
+        a.b + (b.b - a.b) * ratio,
+        a.a + (b.a - a.a) * ratio
+    );
+}
+
 void CCritHack::Draw(CTFPlayer* pLocal)
 {
 	if (!(Vars::Menu::Indicators.Value & Vars::Menu::IndicatorsEnum::CritHack) || !I::EngineClient->IsInGame())
@@ -580,127 +592,145 @@ void CCritHack::Draw(CTFPlayer* pLocal)
 		|| !WeaponCanCrit(pWeapon, true))
 		return;
 
-
-
-	int x = Vars::Menu::CritsDisplay.Value.x;
-	int y = Vars::Menu::CritsDisplay.Value.y + 8;
+	const DragBox_t dtPos = Vars::Menu::CritsDisplay.Value;
 	const auto& fFont = H::Fonts.GetFont(FONT_INDICATORS);
-	const int nTall = fFont.m_nTall + H::Draw.Scale(1);
-	y -= nTall;
+	const int iRounding = H::Draw.Scale(3); 
+	const int iBottomPadding = H::Draw.Scale(4, Scale_Round); 
+	const int iBarRounding = std::max(1, iRounding / 2); 
 
-	EAlign align = ALIGN_TOP;
-	if (x <= 100 + H::Draw.Scale(50, Scale_Round))
-	{
-		x -= H::Draw.Scale(42, Scale_Round);
-		align = ALIGN_TOPLEFT;
-	}
-	else if (x >= H::Draw.m_nScreenW - 100 - H::Draw.Scale(50, Scale_Round))
-	{
-		x += H::Draw.Scale(42, Scale_Round);
-		align = ALIGN_TOPRIGHT;
-	}
+	auto iSlot = pWeapon->GetSlot();
 
-	if (!pWeapon->AreRandomCritsEnabled())
+	if (!WeaponCanCrit(pWeapon, true))
 	{
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextBad.Value, Vars::Menu::Theme::Background.Value, align, "Random crits disabled");
+		int w = H::Draw.Scale(150, Scale_Round);
+		int h = H::Draw.Scale(24, Scale_Round) + iBottomPadding;
+		int x = dtPos.x - w / 2;
+		int y = dtPos.y;
+
+		H::Draw.FillRoundRect(x, y, w, h, iRounding, Vars::Menu::Theme::Background.Value);
+
+		int barHeight = H::Draw.Scale(3, Scale_Round);
+		int barY = y + h - barHeight - iBottomPadding;
+		Color_t dimmedAccent = BlendColors(Vars::Menu::Theme::Accent.Value, Vars::Menu::Theme::Background.Value, 0.7f);
+		H::Draw.FillRoundRect(x + iRounding, barY, w - 2 * iRounding, barHeight, iBarRounding, dimmedAccent);
+
+		Color_t borderColor = BlendColors(Vars::Menu::Theme::Background.Value, Color_t(255, 255, 255, 50), 0.1f);
+		H::Draw.LineRoundRect(x, y, w, h, iRounding, borderColor);
+
+		H::Draw.StringOutlined(
+			fFont,
+			x + H::Draw.Scale(4, Scale_Round),
+			y + (h - barHeight - iBottomPadding) / 2,
+			Vars::Colors::IndicatorTextBad.Value,
+			Vars::Menu::Theme::Background.Value.Alpha(150),
+			ALIGN_LEFT,
+			"No random crits"
+		);
+		
 		return;
 	}
 
-
-
+	auto bRapidFire = pWeapon->IsRapidFire();
 	float flTickBase = TICKS_TO_TIME(pLocal->m_nTickBase());
 
-	if (Vars::Misc::Game::AntiCheatCompatibility.Value)
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextBad.Value, Vars::Menu::Theme::Background.Value, align, "Anticheat compatibility");
+	std::string statusText;
+	Color_t textColor = Vars::Menu::Theme::Active.Value;
+	bool bDimBar = false;
 
-	if (pLocal->IsCritBoosted())
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextMisc.Value, Vars::Menu::Theme::Background.Value, align, "Crit Boosted");
-	else if (pWeapon->m_flCritTime() > flTickBase)
-	{
+	if (Vars::Misc::Game::AntiCheatCompatibility.Value) {
+		statusText = "Anticheat compatibility";
+		textColor = Vars::Colors::IndicatorTextBad.Value;
+		bDimBar = true;
+	}
+	else if (pLocal->IsCritBoosted()) {
+		statusText = "Crit Boosted";
+		textColor = Vars::Colors::IndicatorTextMisc.Value;
+	}
+	else if (pWeapon->m_flCritTime() > flTickBase) {
 		float flTime = pWeapon->m_flCritTime() - flTickBase;
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextMisc.Value, Vars::Menu::Theme::Background.Value, align, std::format("Streaming crits {:.1f}s", flTime).c_str());
+		statusText = std::format("Streaming: {:.1f}s", flTime);
+		textColor = Vars::Colors::IndicatorTextMisc.Value;
 	}
-	else if (!m_bCritBanned)
-	{
-		if (m_iPotentialCrits > 0)
-		{
-			if (m_iAvailableCrits > 0)
-			{
-				if (!pWeapon->IsRapidFire() || flTickBase >= pWeapon->m_flLastRapidFireCritCheckTime() + 1.f)
-					H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextGood.Value, Vars::Menu::Theme::Background.Value, align, "Crit Ready");
-				else
-				{
-					float flTime = pWeapon->m_flLastRapidFireCritCheckTime() + 1.f - flTickBase;
-					H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("Wait {:.1f}s", flTime).c_str());
-				}
+	else if (m_bCritBanned && iSlot != SLOT_MELEE) {
+		statusText = "Crit Banned";
+		textColor = Vars::Colors::IndicatorTextBad.Value;
+		bDimBar = true;
+	}
+	else if (m_flDamage >= 0.f) {
+		if (m_iAvailableCrits > 0) {
+			if (!bRapidFire || flTickBase > pWeapon->m_flLastRapidFireCritCheckTime() + 1.f) {
+				statusText = std::format("Crits: {}/{}", m_iAvailableCrits, m_iPotentialCrits);
+				textColor = Vars::Colors::IndicatorTextGood.Value;
 			}
-			else
-			{
-				int iShots = m_iNextCrit;
-				H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextBad.Value, Vars::Menu::Theme::Background.Value, align, std::format("Crit in {}{} shot{}", iShots, iShots == BUCKET_ATTEMPTS ? "+" : "", iShots == 1 ? "" : "s").c_str());
+			else {
+				statusText = "Wait";
+				textColor = Vars::Menu::Theme::Active.Value;
+				bDimBar = true;
 			}
 		}
+		else {
+			statusText = "No crits available";
+			textColor = Vars::Colors::IndicatorTextBad.Value;
+			bDimBar = true;
+		}
 	}
-	else
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextBad.Value, Vars::Menu::Theme::Background.Value, align, std::format("Deal {} damage", ceilf(m_flDamageTilFlip)).c_str());
+	else {
+		statusText = "Calculating";
+		textColor = Vars::Menu::Theme::Active.Value;
+		bDimBar = true;
+	}
+
+	int w = H::Draw.Scale(150, Scale_Round);
+	int h = H::Draw.Scale(24, Scale_Round) + iBottomPadding;
+	int x = dtPos.x - w / 2;
+	int y = dtPos.y;
+
+	H::Draw.FillRoundRect(x, y, w, h, iRounding, Vars::Menu::Theme::Background.Value);
+
+	int barHeight = H::Draw.Scale(3, Scale_Round);
+	int barY = y + h - barHeight - iBottomPadding;
 	
-	if (m_iPotentialCrits > 0)
-	{
-		int iCrits = m_iAvailableCrits;
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("{}{} / {} crits", iCrits, iCrits == BUCKET_ATTEMPTS ? "+" : "", m_iPotentialCrits).c_str());
-		
-		if (m_iNextCrit && iCrits)
-		{
-			int iShots = m_iNextCrit;
-			H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("Next in {}{} shot{}", iShots, iShots == BUCKET_ATTEMPTS ? "+" : "", iShots == 1 ? "" : "s").c_str());
-		}
-	}
+	float flRatio = 0.0f;
+	if (m_iPotentialCrits > 0 && m_flDamage >= 0.f)
+		flRatio = static_cast<float>(m_iAvailableCrits) / m_iPotentialCrits;
+	flRatio = std::clamp(flRatio, 0.0f, 1.0f);
 
-	if (m_flDamageTilFlip && !m_bCritBanned)
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Colors::IndicatorTextGood.Value, Vars::Menu::Theme::Background.Value, align, std::format("{} damage", floorf(m_flDamageTilFlip)).c_str());
+	static float flAnimatedRatio = 0.0f;
+	flAnimatedRatio = flAnimatedRatio + (flRatio - flAnimatedRatio) * std::min(I::GlobalVars->frametime * 11.3f, 1.0f);
 
-	if (m_iDesyncDamage)
-	{
-		auto tColor = m_iDesyncDamage < 0
-			? Vars::Menu::Theme::Active.Value.Lerp(Vars::Colors::IndicatorTextMid.Value, std::min(fabsf(m_iDesyncDamage) / 100, 1.f))
-			: Vars::Colors::IndicatorTextBad.Value;
-		H::Draw.StringOutlined(fFont, x, y += nTall, tColor, Vars::Menu::Theme::Background.Value, align, std::format("{}{} desync", m_iDesyncDamage > 0 ? "+" : "", m_iDesyncDamage).c_str());
-	}
+	int barWidth = static_cast<int>((w - 2 * iRounding) * flAnimatedRatio);
+	int totalBarWidth = w - 2 * iRounding;
 
+	Color_t dimmedAccent = BlendColors(Vars::Menu::Theme::Accent.Value, Vars::Menu::Theme::Background.Value, bDimBar ? 0.7f : 0.5f);
+	H::Draw.FillRoundRect(x + iRounding, barY, totalBarWidth, barHeight, iBarRounding, dimmedAccent);
 
+	if (barWidth > 0 && !bDimBar)
+		H::Draw.FillRoundRect(x + iRounding, barY, barWidth, barHeight, iBarRounding, Vars::Menu::Theme::Accent.Value);
 
+	Color_t borderColor = BlendColors(Vars::Menu::Theme::Background.Value, Color_t(255, 255, 255, 50), 0.1f);
+	H::Draw.LineRoundRect(x, y, w, h, iRounding, borderColor);
+
+	H::Draw.StringOutlined(
+		fFont,
+		x + H::Draw.Scale(4, Scale_Round),
+		y + (h - barHeight - iBottomPadding) / 2,
+		textColor,
+		Vars::Menu::Theme::Background.Value.Alpha(150),
+		ALIGN_LEFT,
+		statusText.c_str()
+	);
+	// Removed damage desync, i should put it in debug info, whatever it'll do
 	if (Vars::Debug::Info.Value)
 	{
-		H::Draw.StringOutlined(fFont, x, y += nTall * 2, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("RangedDamage: {}, CritDamage: {}", m_iRangedDamage, m_iCritDamage).c_str());
-
-#ifdef SERVER_CRIT_DATA
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("AllDamage: {} ({})", m_iRangedDamage + m_iMeleeDamage, m_iMeleeDamage).c_str());
-
-		if (s_pCTFGameStats)
-		{
-			if (auto pPlayer2 = S::UTIL_PlayerByIndex.Call<void*>(I::EngineClient->GetLocalPlayer()))
-			{
-				if (auto pPlayerStats = S::CTFGameStats_FindPlayerStats.Call<PlayerStats_t*>(s_pCTFGameStats, pPlayer2))
-				{
-					int& iRangedDamage = pPlayerStats->statsCurrentRound.m_iStat[TFSTAT_DAMAGE_RANGED];
-					int& iCritDamage = pPlayerStats->statsCurrentRound.m_iStat[TFSTAT_DAMAGE_RANGED_CRIT_RANDOM];
-					int& iDamage = pPlayerStats->statsCurrentRound.m_iStat[TFSTAT_DAMAGE];
-
-					//iRangedDamage = m_iRangedDamage;
-					//iCritDamage = m_iCritDamage = 0;
-					//iDamage = m_iRangedDamage + m_iMeleeDamage;
-
-					H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("RangedDamage: {}, CritDamage: {}", iRangedDamage, iCritDamage).c_str());
-					H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("AllDamage: {} ({})", iDamage, iDamage - iRangedDamage).c_str());
-				}
-			}
-		}
-
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("ResourceDamage: {} ({})", m_iResourceDamage, m_iMeleeDamage).c_str());
-#endif
-
-		H::Draw.StringOutlined(fFont, x, y += nTall * 2, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("Bucket: {}, Shots: {}, Crits: {}", pWeapon->m_flCritTokenBucket(), pWeapon->m_nCritChecks(), pWeapon->m_nCritSeedRequests()).c_str());
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("Damage: {}, Cost: {}", m_flDamage, m_flCost).c_str());
-		H::Draw.StringOutlined(fFont, x, y += nTall, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, align, std::format("CritChance: {:.2f} ({:.2f})", m_flCritChance, m_flCritChance + 0.1f).c_str());
+		H::Draw.StringOutlined(fFont, x, y + h + H::Draw.Scale(4, Scale_Round), Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, ALIGN_TOPLEFT, 
+			std::format("RangedDamage: {}, CritDamage: {}", m_iRangedDamage, m_iCritDamage).c_str());
+		
+		y += fFont.m_nTall + H::Draw.Scale(1);
+		H::Draw.StringOutlined(fFont, x, y, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, ALIGN_TOPLEFT, 
+			std::format("Bucket: {}, Shots: {}, Crits: {}", pWeapon->m_flCritTokenBucket(), pWeapon->m_nCritChecks(), pWeapon->m_nCritSeedRequests()).c_str());
+		
+		y += fFont.m_nTall + H::Draw.Scale(1);
+		H::Draw.StringOutlined(fFont, x, y, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, ALIGN_TOPLEFT, 
+			std::format("Damage: {}, Cost: {}", m_flDamage, m_flCost).c_str());
 	}
 }

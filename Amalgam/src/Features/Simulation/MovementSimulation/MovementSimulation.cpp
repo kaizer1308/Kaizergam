@@ -1,6 +1,7 @@
 #include "MovementSimulation.h"
 
 #include "../../EnginePrediction/EnginePrediction.h"
+#include <cmath>
 #include <numeric>
 
 namespace MoveSimConstants
@@ -13,6 +14,157 @@ namespace MoveSimConstants
 }
 
 static CUserCmd s_tDummyCmd = {};
+
+namespace
+{
+	static bool StrafePredPointsSane(const std::vector<Vec3>& worldPoints, float& dir)
+	{
+		if (worldPoints.size() < 3)
+			return false;
+
+		for (size_t n = 0; n < worldPoints.size(); n++)
+		{
+			for (size_t j = n + 1; j < worldPoints.size(); j++)
+			{
+				if (worldPoints[n].DistTo(worldPoints[j]) < 1.5f)
+					return false;
+			}
+		}
+
+		float prevDiff = 0.f;
+		bool firstDiff = true;
+
+		for (size_t n = 0; n + 2 < worldPoints.size(); n++)
+		{
+			const float yaw0 = Math::CalcAngle(worldPoints[n], worldPoints[n + 1]).y;
+			const float yaw1 = Math::CalcAngle(worldPoints[n + 1], worldPoints[n + 2]).y;
+			const float curDiff = Math::NormalizeAngle(yaw1 - yaw0);
+			if (fabsf(curDiff) < 0.2f)
+				return false;
+
+			if (!firstDiff)
+			{
+				if ((curDiff > 0.f && prevDiff < 0.f) || (curDiff < 0.f && prevDiff > 0.f))
+					return false;
+			}
+
+			prevDiff = curDiff;
+			firstDiff = false;
+		}
+
+		if (prevDiff > 0.f)
+			dir = -1.f;
+		if (prevDiff < 0.f)
+			dir = 1.f;
+
+		return true;
+	}
+
+	static bool StrafePredProjectAndNormalizePoints(const std::vector<Vec3>& worldPoints, Vec3& offset, std::vector<Vec2>& points)
+	{
+		if (worldPoints.size() < 3)
+			return false;
+
+		Vec3 centroid = {};
+		for (const Vec3& p : worldPoints)
+			centroid += p;
+
+		offset = centroid / static_cast<float>(worldPoints.size());
+
+		points.clear();
+		points.reserve(worldPoints.size());
+		for (const Vec3& p : worldPoints)
+			points.emplace_back(p.x - offset.x, p.y - offset.y);
+
+		return true;
+	}
+
+	static bool StrafePredFitCircleToPoints(const std::vector<Vec2>& points, float& cx, float& cy, float& cr)
+	{
+		if (points.size() < 3)
+			return false;
+
+		float sumx = 0.f;
+		float sumy = 0.f;
+		float sumx2 = 0.f;
+		float sumy2 = 0.f;
+		float sumxy = 0.f;
+		float sumx3 = 0.f;
+		float sumy3 = 0.f;
+		float sumx1y2 = 0.f;
+		float sumx2y1 = 0.f;
+
+		for (const Vec2& point : points)
+		{
+			const float x = point.x;
+			const float y = point.y;
+			const float x2 = x * x;
+			const float y2 = y * y;
+			const float xy = x * y;
+			const float x3 = x2 * x;
+			const float y3 = y2 * y;
+			const float x1y2 = x * y2;
+			const float x2y1 = x2 * y;
+
+			sumx += x;
+			sumy += y;
+			sumx2 += x2;
+			sumy2 += y2;
+			sumxy += xy;
+			sumx3 += x3;
+			sumy3 += y3;
+			sumx1y2 += x1y2;
+			sumx2y1 += x2y1;
+		}
+
+		const float N = static_cast<float>(points.size());
+		const float C = N * sumx2 - sumx * sumx;
+		const float D = N * sumxy - sumx * sumy;
+		const float E = N * sumx3 + N * sumx1y2 - (sumx2 + sumy2) * sumx;
+		const float G = N * sumy2 - sumy * sumy;
+		const float H = N * sumy3 + N * sumx2y1 - (sumx2 + sumy2) * sumy;
+
+		const float denom = C * G - D * D;
+		if (fabsf(denom) < 1e-6f)
+			return false;
+
+		const float a = (H * D - E * G) / denom;
+		const float b = (E * D - H * C) / denom;
+		const float c = -(a * sumx + b * sumy + sumx2 + sumy2) / N;
+
+		cx = a / -2.f;
+		cy = b / -2.f;
+
+		const float radicand = a * a + b * b - 4.f * c;
+		if (!(radicand > 0.f))
+			return false;
+
+		cr = sqrtf(radicand) / 2.f;
+		return std::isfinite(cx) && std::isfinite(cy) && std::isfinite(cr);
+	}
+
+	static bool StrafePredCalcYawPerTick(const std::vector<Vec3>& points, const float playerSpeed, float& yawPerTick)
+	{
+		float strafeDir = 0.f;
+		if (!StrafePredPointsSane(points, strafeDir))
+			return false;
+
+		Vec3 offset = {};
+		std::vector<Vec2> normalizedPoints = {};
+		if (!StrafePredProjectAndNormalizePoints(points, offset, normalizedPoints))
+			return false;
+
+		float cx = 0.f;
+		float cy = 0.f;
+		float cr = 0.f;
+		if (!StrafePredFitCircleToPoints(normalizedPoints, cx, cy, cr))
+			return false;
+		if (cr < 5.f)
+			return false;
+		yawPerTick = std::clamp((RAD2DEG(playerSpeed / cr) * TICK_INTERVAL) * strafeDir, -5.f, 5.f);
+		return std::isfinite(yawPerTick) && fabsf(yawPerTick) > 0.001f;
+	}
+}
 
 void CMovementSimulation::Store(MoveStorage& tStorage)
 {
@@ -132,6 +284,7 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 	}
 
 	tStorage.m_flAverageYaw = 0.f; // reset any stale strafe estimation
+	tStorage.m_bCircleStrafe = false;
 
 	auto pPlayer = pEntity->As<CTFPlayer>();
 	tStorage.m_pPlayer = pPlayer;
@@ -621,6 +774,35 @@ bool CMovementSimulation::StrafePrediction(MoveStorage& tStorage, int iSamples)
 		: !(Vars::Aimbot::Projectile::StrafePrediction.Value & Vars::Aimbot::Projectile::StrafePredictionEnum::Air))
 		return false;
 
+	auto& vRecords = m_mRecords[tStorage.m_pPlayer->entindex()];
+	constexpr size_t iNumRecs = 5ull;
+	if (vRecords.size() >= 3)
+	{
+		tStorage.m_vStrafeSamples.clear();
+		if (tStorage.m_vStrafeSamples.capacity() < iNumRecs)
+			tStorage.m_vStrafeSamples.reserve(iNumRecs);
+
+		const int iMode = vRecords.front().m_iMode;
+		for (size_t i = 0; i < vRecords.size() && tStorage.m_vStrafeSamples.size() < iNumRecs; i++)
+		{
+			if (vRecords[i].m_iMode == iMode)
+				tStorage.m_vStrafeSamples.push_back(vRecords[i].m_vOrigin);
+		}
+
+		float flYawPerTick = 0.f;
+		if (tStorage.m_vStrafeSamples.size() >= 3 && StrafePredCalcYawPerTick(tStorage.m_vStrafeSamples, tStorage.m_MoveData.m_vecVelocity.Length2D(), flYawPerTick))
+		{
+			tStorage.m_flAverageYaw = flYawPerTick;
+			tStorage.m_bCircleStrafe = !tStorage.m_bDirectMove;
+			if (!tStorage.m_bDirectMove)
+			{
+				tStorage.m_MoveData.m_flForwardMove = 0.f;
+				tStorage.m_MoveData.m_flSideMove = (flYawPerTick > 0.f) ? -MoveSimConstants::MAX_MOVEMENT_SPEED : MoveSimConstants::MAX_MOVEMENT_SPEED;
+			}
+			return true;
+		}
+	}
+
 	GetAverageYaw(tStorage, iSamples);
 	return true;
 }
@@ -679,11 +861,17 @@ void CMovementSimulation::RunTick(MoveStorage& tStorage, bool bPath, std::functi
 	
 	CScopedBounds scopedBounds(tStorage.m_pPlayer);
 
+	if (tStorage.m_bCircleStrafe && tStorage.m_bDirectMove)
+	{
+		tStorage.m_bCircleStrafe = false;
+		tStorage.m_flAverageYaw = 0.f;
+	}
+
 	float flAppliedYaw = 0.f;
 	if (tStorage.m_flAverageYaw)
 	{
 		float flMult = 1.f;
-		if (!tStorage.m_bDirectMove && !tStorage.m_pPlayer->InCond(TF_COND_SHIELD_CHARGE)
+		if (!tStorage.m_bCircleStrafe && !tStorage.m_bDirectMove && !tStorage.m_pPlayer->InCond(TF_COND_SHIELD_CHARGE)
 			&& (Vars::Aimbot::Projectile::MovesimFrictionFlags.Value & Vars::Aimbot::Projectile::MovesimFrictionFlagsEnum::RunReduce))
 		{
 			flMult = GetFrictionScale(tStorage.m_MoveData.m_vecVelocity.Length2D(), tStorage.m_flAverageYaw, tStorage.m_MoveData.m_vecVelocity.z + GetGravity(tStorage.m_pPlayer) * TICK_INTERVAL);
