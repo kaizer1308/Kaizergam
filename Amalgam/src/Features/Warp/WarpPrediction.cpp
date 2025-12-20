@@ -115,7 +115,7 @@ bool CWarpPrediction::PredictWarpPosition(int iIndex, Vec3& vPredictedPos, float
 		return false;
 
 	auto pEntity = I::ClientEntityList->GetClientEntity(iIndex);
-	if (!pEntity || pEntity->GetClientClass()->m_ClassID != ETFClassID::CTFPlayer)
+	if (!pEntity || pEntity->GetClientClass()->m_ClassID != static_cast<int>(ETFClassID::CTFPlayer))
 		return false;
 
 	auto pPlayer = pEntity->As<CTFPlayer>();
