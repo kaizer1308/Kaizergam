@@ -93,10 +93,9 @@ void CMovementSimulation::Store()
 
 		if (pLastRecord)
 		{
-			const float flRecordDelta = std::clamp(flSimTime - pLastRecord->m_flSimTime, 0.f, 0.25f);
 			CGameTrace trace = {};
 			CTraceFilterWorldAndPropsOnly filter = {};
-			SDK::TraceHull(pLastRecord->m_vOrigin, pLastRecord->m_vOrigin + pLastRecord->m_vVelocity * flRecordDelta, pPlayer->m_vecMins() + MoveSimConstants::HULL_PADDING, pPlayer->m_vecMaxs() - MoveSimConstants::HULL_PADDING, pPlayer->SolidMask(), &filter, &trace);
+			SDK::TraceHull(pLastRecord->m_vOrigin, pLastRecord->m_vOrigin + pLastRecord->m_vVelocity * TICK_INTERVAL, pPlayer->m_vecMins() + MoveSimConstants::HULL_PADDING, pPlayer->m_vecMaxs() - MoveSimConstants::HULL_PADDING, pPlayer->SolidMask(), &filter, &trace);
 			if (trace.DidHit() && trace.plane.normal.z < 0.5f)
 				vRecords.clear();
 		}
@@ -140,8 +139,6 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tStorage
 	// store vars
 	m_bOldInPrediction = I::Prediction->m_bInPrediction;
 	m_bOldFirstTimePredicted = I::Prediction->m_bFirstTimePredicted;
-	m_nOldTickCount = I::GlobalVars->tickcount;
-	m_flOldCurtime = I::GlobalVars->curtime;
 	m_flOldFrametime = I::GlobalVars->frametime;
 
 	// store restore data
@@ -351,8 +348,8 @@ bool CMovementSimulation::SetupMoveData(MoveStorage& tStorage)
 			{
 				Vec3 vForward = {}, vRight = {};
 				Math::AngleVectors(tStorage.m_MoveData.m_vecViewAngles, &vForward, &vRight);
-				vForward = vForward.To2D().Normalized2D();
-				vRight = vRight.To2D().Normalized2D();
+				vForward = vForward.To2D();
+				vRight = vRight.To2D();
 				const Vec3 vWish = tRecord.m_vDirection;
 				tStorage.m_MoveData.m_flForwardMove = vWish.Dot(vForward);
 				tStorage.m_MoveData.m_flSideMove = vWish.Dot(vRight);
@@ -678,8 +675,6 @@ void CMovementSimulation::RunTick(MoveStorage& tStorage, bool bPath, std::functi
 	// make sure frametime and prediction vars are right
 	I::Prediction->m_bInPrediction = true;
 	I::Prediction->m_bFirstTimePredicted = false;
-	I::GlobalVars->tickcount = TIME_TO_TICKS(tStorage.m_flSimTime);
-	I::GlobalVars->curtime = tStorage.m_flSimTime;
 	I::GlobalVars->frametime = I::Prediction->m_bEnginePaused ? 0.f : TICK_INTERVAL;
 	
 	CScopedBounds scopedBounds(tStorage.m_pPlayer);
@@ -756,8 +751,6 @@ void CMovementSimulation::Restore(MoveStorage& tStorage)
 
 	I::Prediction->m_bInPrediction = m_bOldInPrediction;
 	I::Prediction->m_bFirstTimePredicted = m_bOldFirstTimePredicted;
-	I::GlobalVars->tickcount = m_nOldTickCount;
-	I::GlobalVars->curtime = m_flOldCurtime;
 	I::GlobalVars->frametime = m_flOldFrametime;
 }
 
@@ -768,7 +761,7 @@ float CMovementSimulation::GetPredictedDelta(CBaseEntity* pEntity)
 	{
 		switch (Vars::Aimbot::Projectile::DeltaMode.Value)
 		{
-		case 0: return std::accumulate(vSimTimes.begin(), vSimTimes.end(), 0.f) / vSimTimes.size();
+		case 0: return std::reduce(vSimTimes.begin(), vSimTimes.end()) / vSimTimes.size();
 		case 1: return *std::max_element(vSimTimes.begin(), vSimTimes.end());
 		}
 	}

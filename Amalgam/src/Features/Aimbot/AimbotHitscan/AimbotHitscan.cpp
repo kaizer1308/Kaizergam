@@ -849,7 +849,7 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 				pCmd->tick_count = TIME_TO_TICKS(tTarget.m_pRecord->m_flSimTime) + TIME_TO_TICKS(F::Backtrack.GetFakeInterp());
 		}
 
-		if (tTarget.m_iTargetType == TargetEnum::Player && F::WarpPrediction.IsWarping(tTarget.m_pEntity->entindex()) && H::Entities.GetLagCompensation(tTarget.m_pEntity->entindex()))
+		if (tTarget.m_iTargetType == TargetEnum::Player && F::WarpPrediction.IsWarping(tTarget.m_pEntity->entindex()))
 		{
 			Vec3 vPredictedPos;
 			if (F::WarpPrediction.PredictWarpPosition(tTarget.m_pEntity->entindex(), vPredictedPos))
@@ -857,15 +857,10 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 				Vec3 vEyePos = pLocal->GetShootPos();
 				Vec3 vPredictedAngle = Math::CalcAngle(vEyePos, vPredictedPos);
 
-				float flAlignment = F::WarpPrediction.GetAlignmentFactor(tTarget.m_pEntity->entindex(), vPredictedAngle);
+				tTarget.m_vAngleTo = vPredictedAngle;
+				tTarget.m_vPos = vPredictedPos;
 
-				if (flAlignment > 0.7f)
-				{
-					tTarget.m_vAngleTo = vPredictedAngle;
-					tTarget.m_vPos = vPredictedPos;
-
-					tTarget.m_bWarpPredicted = true;
-				}
+				tTarget.m_bWarpPredicted = true;
 			}
 		}
 

@@ -1,7 +1,9 @@
 #include "WarpPrediction.h"
 #include "../Backtrack/Backtrack.h"
+#include "../../Simulation/MovementSimulation/MovementSimulation.h"
 
-// gods work by sean
+
+// I don't know if I recoded this right -sean
 void CWarpPrediction::Initialize()
 {
 	m_mPredictedPositions.clear();
@@ -38,10 +40,6 @@ void CWarpPrediction::Update()
 			continue;
 		}
 
-		m_mLastPositions[iIndex] = pPlayer->m_vecOrigin();
-
-		m_mMovementVectors[iIndex] = CalculateMovementVector(vRecords);
-
 		m_mIsWarping[iIndex] = DetectWarping(iIndex, vRecords);
 
 		if (m_mIsWarping[iIndex])
@@ -53,67 +51,21 @@ void CWarpPrediction::Update()
 	}
 }
 
-Vec3 CWarpPrediction::CalculateMovementVector(const std::vector<TickRecord*>& vRecords)
-{
-	if (vRecords.size() < 2)
-		return Vec3();
-
-	const int iSamplesToUse = std::min(5, (int)vRecords.size() - 1);
-
-	Vec3 vTotalDelta;
-	float flTotalTime = 0.0f;
-
-	for (int i = 0; i < iSamplesToUse; i++)
-	{
-		Vec3 vDelta = vRecords[i]->m_vOrigin - vRecords[i + 1]->m_vOrigin;
-		float flTimeDelta = vRecords[i]->m_flSimTime - vRecords[i + 1]->m_flSimTime;
-
-		if (flTimeDelta > 0.0f)
-		{
-			vTotalDelta += vDelta;
-			flTotalTime += flTimeDelta;
-		}
-	}
-
-	Vec3 vVelocity = flTotalTime > 0.0f ? vTotalDelta / flTotalTime : Vec3();
-
-	float flSpeed = vVelocity.Length2D();
-	if (flSpeed > m_flMinVelocity)
-		return vVelocity.Normalized();
-
-	return Vec3();
-}
-
 bool CWarpPrediction::DetectWarping(int iIndex, const std::vector<TickRecord*>& vRecords)
 {
 	if (vRecords.size() < 2)
 		return false;
 
-	for (size_t i = 0; i < vRecords.size() - 1; i++)
-	{
-		Vec3 vDelta = vRecords[i]->m_vOrigin - vRecords[i + 1]->m_vOrigin;
-		float flTimeDelta = vRecords[i]->m_flSimTime - vRecords[i + 1]->m_flSimTime;
-
-		float flVelocity = flTimeDelta > 0.0f ? vDelta.Length2D() / flTimeDelta : 0.0f;
-
-		if (flVelocity > 500.0f)
-			return true;
-
-		if (vDelta.Length2DSqr() > m_flWarpThreshold && flTimeDelta < 0.1f)
-			return true;
-
-		if (flTimeDelta > 0.1f) // More than ~6-7 ticks
-			return true;
-	}
+	// Check if the latest record broke lag compensation (teleported)
+	Vec3 vDelta = vRecords[0]->m_vOrigin - vRecords[1]->m_vOrigin;
+	if (vDelta.Length2DSqr() > 4096.0f) // 64^2
+		return true;
 
 	return false;
 }
 
-bool CWarpPrediction::PredictWarpPosition(int iIndex, Vec3& vPredictedPos, float flPredictionTime)
+bool CWarpPrediction::PredictWarpPosition(int iIndex, Vec3& vPredictedPos)
 {
-	if (!m_mMovementVectors.contains(iIndex) || !m_mLastPositions.contains(iIndex))
-		return false;
-
 	auto pEntity = I::ClientEntityList->GetClientEntity(iIndex);
 	if (!pEntity || pEntity->GetClientClass()->m_ClassID != static_cast<int>(ETFClassID::CTFPlayer))
 		return false;
@@ -122,45 +74,29 @@ bool CWarpPrediction::PredictWarpPosition(int iIndex, Vec3& vPredictedPos, float
 	if (!pPlayer || !pPlayer->IsAlive())
 		return false;
 
-	Vec3 vVelocity = pPlayer->m_vecVelocity();
-	float flSpeed = vVelocity.Length2D();
+	std::vector<TickRecord*> vRecords;
+	if (!F::Backtrack.GetRecords(pPlayer, vRecords) || vRecords.size() < 2)
+		return false;
 
-	if (flSpeed < m_flMinVelocity)
-	{
-		vVelocity = m_mMovementVectors[iIndex] * 300.0f;
-		flSpeed = 300.0f;
-	}
+	// Calculate choked commands
+	float flSimTime = vRecords[0]->m_flSimTime;
+	float flOldSimTime = vRecords[1]->m_flSimTime;
+	int iTicks = TIME_TO_TICKS(flSimTime - flOldSimTime);
 
-	flPredictionTime = std::min(flPredictionTime, m_flMaxPredictionTime);
+	if (iTicks <= 0 || iTicks > 22)
+		return false;
 
-	vPredictedPos = m_mLastPositions[iIndex] + vVelocity * flPredictionTime;
+	MoveStorage tStorage;
+	F::MoveSim.Initialize(pPlayer, tStorage);
 
-	CGameTrace trace;
-	CTraceFilterWorldAndPropsOnly filter;
-	SDK::TraceHull(m_mLastPositions[iIndex], vPredictedPos, pPlayer->m_vecMins(), pPlayer->m_vecMaxs(), pPlayer->SolidMask(), &filter, &trace);
+	// Run simulation for choked ticks
+	for (int i = 0; i < iTicks; i++)
+		F::MoveSim.RunTick(tStorage);
 
-	if (trace.fraction < 1.0f)
-	{
-		vPredictedPos = trace.endpos;
-		return true;
-	}
+	vPredictedPos = tStorage.m_vPredictedOrigin;
 
+	F::MoveSim.Restore(tStorage);
 	return true;
-}
-
-float CWarpPrediction::CalculateAlignmentFactor(const Vec3& vAimDirection, const Vec3& vMovementVector)
-{
-	Vec3 aimDir = vAimDirection;
-	Vec3 moveVec = vMovementVector;
-	return aimDir.Normalized().Dot(moveVec.Normalized());
-}
-
-float CWarpPrediction::GetAlignmentFactor(int iIndex, const Vec3& vAimDirection)
-{
-	if (!m_mMovementVectors.contains(iIndex))
-		return 0.0f;
-
-	return CalculateAlignmentFactor(vAimDirection, m_mMovementVectors[iIndex]);
 }
 
 bool CWarpPrediction::IsWarping(int iIndex)
@@ -168,14 +104,4 @@ bool CWarpPrediction::IsWarping(int iIndex)
 	return m_mIsWarping.contains(iIndex) && m_mIsWarping[iIndex];
 }
 
-void CWarpPrediction::Draw()
-{
-	// Draw predicted positions for debugging
-	for (const auto& [index, position] : m_mPredictedPositions)
-	{
-		if (m_mIsWarping.contains(index) && m_mIsWarping[index])
-		{
-			// draw here for visualizatiaon
-		}
-	}
-}
+

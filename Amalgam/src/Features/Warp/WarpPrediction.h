@@ -14,15 +14,12 @@ private:
 	float m_flWarpThreshold = 500.0f;
 	float m_flMaxPredictionTime = 1.0f;
 
-	Vec3 CalculateMovementVector(const std::vector<TickRecord*>& vRecords);
 	bool DetectWarping(int iIndex, const std::vector<TickRecord*>& vRecords);
-	float CalculateAlignmentFactor(const Vec3& vAimDirection, const Vec3& vMovementVector);
 
 public:
 	void Initialize();
 	void Update();
-	bool PredictWarpPosition(int iIndex, Vec3& vPredictedPos, float flPredictionTime = 0.2f);
-	float GetAlignmentFactor(int iIndex, const Vec3& vAimDirection);
+	bool PredictWarpPosition(int iIndex, Vec3& vPredictedPos);
 	bool IsWarping(int iIndex);
 	void Draw();
 	

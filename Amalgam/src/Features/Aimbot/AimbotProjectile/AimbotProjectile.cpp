@@ -1079,7 +1079,7 @@ static inline Vec3 PullPoint(Vec3 vPoint, Vec3 vLocalPos, Info_t& tInfo, Vec3 vM
 
 
 
-static inline void SolveProjectileSpeed(CTFWeaponBase* pWeapon, const Vec3& vLocalPos, const Vec3& vTargetPos, float& flVelocity, float& flDragTime, const float flGravity, int iPitchPreference = 0)
+static inline void SolveProjectileSpeed(CTFWeaponBase* pWeapon, const Vec3& vLocalPos, const Vec3& vTargetPos, float& flVelocity, float& flDragTime, const float flGravity)
 {
 	if (!F::ProjSim.m_pObj->IsDragEnabled() || F::ProjSim.m_pObj->m_dragBasis.IsZero())
 		return;
@@ -1095,11 +1095,7 @@ static inline void SolveProjectileSpeed(CTFWeaponBase* pWeapon, const Vec3& vLoc
 	if (flRoot < 0.f)
 		return;
 
-	float flPitch;
-	if (iPitchPreference == 2)
-		flPitch = atan((flVel2 + sqrt(flRoot)) / (flGrav * flDist)); // high arc
-	else
-		flPitch = atan((flVel2 - sqrt(flRoot)) / (flGrav * flDist)); // low arc
+	const float flPitch = atan((flVel2 - sqrt(flRoot)) / (flGrav * flDist));
 	const float flTime = flDist / (cos(flPitch) * flVelocity);
 
 	float flDrag = 0.f;
@@ -1158,7 +1154,7 @@ void CAimbotProjectile::CalculateAngle(const Vec3& vLocalPos, const Vec3& vTarge
 		{
 			Vec3 vForward, vRight, vUp; Math::AngleVectors(Math::CalcAngle(vLocalPos, vTargetPos), &vForward, &vRight, &vUp);
 			Vec3 vShootPos = vLocalPos + (vForward * m_tInfo.m_vOffset.x) + (vRight * m_tInfo.m_vOffset.y) + (vUp * m_tInfo.m_vOffset.z);
-			SolveProjectileSpeed(m_tInfo.m_pWeapon, vShootPos, vTargetPos, flVelocity, flDragTime, m_tInfo.m_flGravity, iPitchPreference);
+			SolveProjectileSpeed(m_tInfo.m_pWeapon, vShootPos, vTargetPos, flVelocity, flDragTime, m_tInfo.m_flGravity);
 		}
 
 		Vec3 vDelta = vTargetPos - vLocalPos;
@@ -1238,7 +1234,7 @@ void CAimbotProjectile::CalculateAngle(const Vec3& vLocalPos, const Vec3& vTarge
 
 	{	// calculate trajectory from projectile origin
 		float flVelocity = m_tInfo.m_flVelocity, flDragTime = 0.f;
-		SolveProjectileSpeed(m_tInfo.m_pWeapon, tProjInfo.m_vPos, vTargetPos, flVelocity, flDragTime, m_tInfo.m_flGravity, iPitchPreference);
+		SolveProjectileSpeed(m_tInfo.m_pWeapon, tProjInfo.m_vPos, vTargetPos, flVelocity, flDragTime, m_tInfo.m_flGravity);
 
 		Vec3 vDelta = vTargetPos - tProjInfo.m_vPos;
 		float flDist = vDelta.Length2D();
@@ -1618,7 +1614,7 @@ int CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBas
 	Vec3 vAngleTo, vPredicted, vTarget;
 	int iLowestPriority = std::numeric_limits<int>::max(); float flLowestDist = std::numeric_limits<float>::max();
 	int iLowestSmoothPriority = iLowestPriority; float flLowestSmoothDist = flLowestDist;
-	for (int i = -TIME_TO_TICKS(m_tInfo.m_flLatency); i <= iMaxTime; i++)
+	for (int i = 1 - TIME_TO_TICKS(m_tInfo.m_flLatency); i <= iMaxTime; i++)
 	{
 		if (!tStorage.m_bFailed)
 		{
@@ -2319,7 +2315,7 @@ bool CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBa
 
 	Vec3 vAngleTo, vPredicted, vTarget;
 	int iLowestPriority = std::numeric_limits<int>::max(); float flLowestDist = std::numeric_limits<float>::max();
-	for (int i = -TIME_TO_TICKS(m_tInfo.m_flLatency); i <= iMaxTime; i++)
+	for (int i = 1 - TIME_TO_TICKS(m_tInfo.m_flLatency); i <= iMaxTime; i++)
 	{
 		if (!tStorage.m_bFailed)
 		{
