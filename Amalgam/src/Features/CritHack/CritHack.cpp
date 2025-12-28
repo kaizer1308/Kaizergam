@@ -570,7 +570,6 @@ MAKE_HOOK(CTFGameStats_FindPlayerStats, S::CTFGameStats_FindPlayerStats(), void*
 }
 #endif
 
-// im a retard, so lets manually blend them colors
 Color_t BlendColors(const Color_t& a, const Color_t& b, float ratio)
 {
     ratio = std::clamp(ratio, 0.0f, 1.0f);
@@ -652,9 +651,8 @@ void CCritHack::Draw(CTFPlayer* pLocal)
 		textColor = Vars::Colors::IndicatorTextMisc.Value;
 	}
 	else if (m_bCritBanned && iSlot != SLOT_MELEE) {
-		statusText = "Crit Banned";
+		statusText = std::format("Crit Banned ({:.0f})", m_flDamageTilFlip);
 		textColor = Vars::Colors::IndicatorTextBad.Value;
-		bDimBar = true;
 	}
 	else if (m_flDamage >= 0.f) {
 		if (m_iAvailableCrits > 0) {
@@ -691,7 +689,11 @@ void CCritHack::Draw(CTFPlayer* pLocal)
 	int barY = y + h - barHeight - iBottomPadding;
 	
 	float flRatio = 0.0f;
-	if (m_iPotentialCrits > 0 && m_flDamage >= 0.f)
+	if (m_bCritBanned)
+		flRatio = 0.0f;
+	else if (pLocal->IsCritBoosted())
+		flRatio = 1.0f;
+	else if (m_iPotentialCrits > 0 && m_flDamage >= 0.f)
 		flRatio = static_cast<float>(m_iAvailableCrits) / m_iPotentialCrits;
 	flRatio = std::clamp(flRatio, 0.0f, 1.0f);
 
@@ -719,7 +721,8 @@ void CCritHack::Draw(CTFPlayer* pLocal)
 		ALIGN_LEFT,
 		statusText.c_str()
 	);
-	// Removed damage desync, i should put it in debug info, whatever it'll do
+	/* 
+	// no longer need these, but ill keep them here incase i want to do something with them
 	if (Vars::Debug::Info.Value)
 	{
 		H::Draw.StringOutlined(fFont, x, y + h + H::Draw.Scale(4, Scale_Round), Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, ALIGN_TOPLEFT, 
@@ -733,4 +736,5 @@ void CCritHack::Draw(CTFPlayer* pLocal)
 		H::Draw.StringOutlined(fFont, x, y, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, ALIGN_TOPLEFT, 
 			std::format("Damage: {}, Cost: {}", m_flDamage, m_flCost).c_str());
 	}
+	*/
 }
