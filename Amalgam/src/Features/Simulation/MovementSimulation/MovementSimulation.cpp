@@ -560,14 +560,11 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tStorage, int iSamples)
 		flYaw1 = flYaw2; // Cache for next iteration
 
 		if (!bResult)
-		{
-			state = {};
-			continue;
-		}
+			break;
 
-		const int iTicks = std::max(TIME_TO_TICKS(flDeltaTime), 1);
+		const float flTicks = std::max(flDeltaTime / TICK_INTERVAL, 1.f);
 
-		const float flYawRate = flYaw / iTicks;
+		const float flYawRate = flYaw / flTicks;
 		++iValidStrafes;
 		const double dbWeight = flSpeed * flDeltaTime * std::exp(-dbAccumulatedTime * MoveSimConstants::WEIGHT_EXP_DECAY); // weight yaw by speed and time
 		dbWeightedYaw += flYawRate * dbWeight;
