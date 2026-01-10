@@ -685,6 +685,12 @@ void CMovementSimulation::RunTick(MoveStorage& tStorage, bool bPath, std::functi
 
 		flAppliedYaw = tStorage.m_flAverageYaw * flMult;
 		tStorage.m_MoveData.m_vecViewAngles.y += flAppliedYaw;
+
+		if (!tStorage.m_bDirectMove && !tStorage.m_pPlayer->InCond(TF_COND_SHIELD_CHARGE))
+		{
+			tStorage.m_MoveData.m_flForwardMove = 0.f;
+			tStorage.m_MoveData.m_flSideMove = (tStorage.m_flAverageYaw > 0 ? -1.f : 1.f) * tStorage.m_MoveData.m_flMaxSpeed;
+		}
 	}
 	else if (!tStorage.m_bDirectMove)
 		tStorage.m_MoveData.m_flForwardMove = tStorage.m_MoveData.m_flSideMove = 0.f;
