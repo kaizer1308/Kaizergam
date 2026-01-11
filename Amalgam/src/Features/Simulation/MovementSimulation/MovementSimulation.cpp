@@ -60,15 +60,18 @@ void CMovementSimulation::Store()
 		bool bLocal = pPlayer->entindex() == I::EngineClient->GetLocalPlayer() && !I::EngineClient->IsPlayingDemo();
 		Vec3 vVelocity = bLocal ? F::EnginePrediction.m_vVelocity : pPlayer->m_vecVelocity();
 		Vec3 vOrigin = bLocal ? F::EnginePrediction.m_vOrigin : pPlayer->m_vecOrigin();
-		if (vVelocity.IsZero())
+		float flMaxSpeed = SDK::MaxSpeed(pPlayer);
+		Vec3 vDirection = Vec3();
+		if (vVelocity.Length2D() > flMaxSpeed * MoveSimConstants::VELOCITY_THRESHOLD)
+			vDirection = vVelocity.Normalized2D() * flMaxSpeed;
+		if (pPlayer->IsSwimming())
+			vDirection.z = vVelocity.z;
+
+		if (vDirection.IsZero())
 		{
 			vRecords.clear();
 			continue;
 		}
-		float flMaxSpeed = SDK::MaxSpeed(pPlayer);
-		Vec3 vDirection = vVelocity.To2D().IsZero() ? Vec3() : vVelocity.Normalized2D() * flMaxSpeed;
-		if (pPlayer->IsSwimming())
-			vDirection.z = vVelocity.z;
 
 		MoveData* pLastRecord = !vRecords.empty() ? &vRecords.front() : nullptr;
 		const float flSimTime = pPlayer->m_flSimulationTime();
